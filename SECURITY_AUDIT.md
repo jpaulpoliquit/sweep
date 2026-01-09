@@ -1,25 +1,23 @@
-# Sweep Security Audit Report
-
-<div align="center">
+# Security Audit Report
 
 **Status:** PASSED | **Risk Level:** LOW | **Version:** 0.1.0 (2026-01-10)
-
-</div>
 
 ---
 
 ## Audit Overview
 
-| Attribute | Details |
-|-----------|---------|
-| Audit Date | January 10, 2026 |
-| Audit Conclusion | **PASSED** |
-| Sweep Version | v0.1.0 |
-| Audited Branch | `main` (HEAD) |
-| Scope | Rust binaries, PowerShell installer, Configuration |
-| Methodology | Static analysis, Threat modeling, Code review |
-| Review Cycle | Every 6 months or after major feature additions |
-| Next Review | July 2026 |
+
+| Attribute        | Details                                            |
+| ---------------- | -------------------------------------------------- |
+| Audit Date       | January 10, 2026                                   |
+| Audit Conclusion | **PASSED**                                         |
+| Sweep Version    | v0.1.0                                             |
+| Audited Branch   | `main` (HEAD)                                      |
+| Scope            | Rust binaries, PowerShell installer, Configuration |
+| Methodology      | Static analysis, Threat modeling, Code review      |
+| Review Cycle     | Every 6 months or after major feature additions    |
+| Next Review      | July 2026                                          |
+
 
 **Key Findings:**
 
@@ -52,19 +50,21 @@ Sweep is built with a **defensive-first** architecture for filesystem operations
 
 ### Attack Vectors & Mitigations
 
-| Threat | Risk Level | Mitigation | Status |
-|--------|------------|------------|--------|
-| Accidental User File Deletion | Critical | Recycle Bin default, dry-run mode, confirmation prompts | ✅ Mitigated |
-| Active Project Deletion | High | 14-day project activity detection, git index monitoring | ✅ Mitigated |
-| Symlink/Junction Following | High | `should_skip_entry()` checks symlinks & reparse points | ✅ Mitigated |
-| Long Path Failures | Medium | `\\?\` prefix support via `to_long_path()` utility | ✅ Mitigated |
-| Locked File Crashes | Medium | `is_file_locked()` pre-flight check on Windows | ✅ Mitigated |
-| System Directory Deletion | High | `SYSTEM_DIRS` blocklist + `is_system_path()` validation | ✅ Mitigated |
-| Infinite Directory Loops | High | `MAX_DEPTH` limits (10-20) + symlink detection | ✅ Mitigated |
-| Race Conditions | Medium | Atomic operations, file existence checks before deletion | ✅ Mitigated |
-| Command Injection | Low | No shell execution; Rust-native filesystem APIs | ✅ Mitigated |
-| Privilege Escalation | Low | No admin required; user-scoped operations only | ✅ Mitigated |
-| False Positive Deletion | Medium | Category-specific targeting, config exclusions | ✅ Mitigated |
+
+| Threat                        | Risk Level | Mitigation                                               | Status      |
+| ----------------------------- | ---------- | -------------------------------------------------------- | ----------- |
+| Accidental User File Deletion | Critical   | Recycle Bin default, dry-run mode, confirmation prompts  | ✅ Mitigated |
+| Active Project Deletion       | High       | 14-day project activity detection, git index monitoring  | ✅ Mitigated |
+| Symlink/Junction Following    | High       | `should_skip_entry()` checks symlinks & reparse points   | ✅ Mitigated |
+| Long Path Failures            | Medium     | `\\?\` prefix support via `to_long_path()` utility       | ✅ Mitigated |
+| Locked File Crashes           | Medium     | `is_file_locked()` pre-flight check on Windows           | ✅ Mitigated |
+| System Directory Deletion     | High       | `SYSTEM_DIRS` blocklist + `is_system_path()` validation  | ✅ Mitigated |
+| Infinite Directory Loops      | High       | `MAX_DEPTH` limits (10-20) + symlink detection           | ✅ Mitigated |
+| Race Conditions               | Medium     | Atomic operations, file existence checks before deletion | ✅ Mitigated |
+| Command Injection             | Low        | No shell execution; Rust-native filesystem APIs          | ✅ Mitigated |
+| Privilege Escalation          | Low        | No admin required; user-scoped operations only           | ✅ Mitigated |
+| False Positive Deletion       | Medium     | Category-specific targeting, config exclusions           | ✅ Mitigated |
+
 
 ---
 
@@ -99,6 +99,7 @@ pub const SYSTEM_DIRS: &[&str] = &[
 #### Layer 2: Symlink & Junction Detection
 
 Windows junction points and symlinks are detected and skipped to prevent:
+
 - Infinite traversal loops
 - Unintended system directory access
 - OneDrive placeholder issues
@@ -123,12 +124,14 @@ pub fn should_skip_entry(path: &Path) -> bool {
 
 Build artifacts are only cleaned from **inactive projects** to prevent deleting dependencies from active development:
 
-| Check | Indicator | Threshold |
-|-------|-----------|-----------|
-| Git Index | `.git/index` modification time | 14 days |
-| Git HEAD | `.git/HEAD` modification time | 14 days |
-| Lock Files | `package-lock.json`, `Cargo.lock`, etc. | 14 days |
-| Source Files | `.rs`, `.js`, `.ts`, `.py` modification | 14 days |
+
+| Check        | Indicator                               | Threshold |
+| ------------ | --------------------------------------- | --------- |
+| Git Index    | `.git/index` modification time          | 14 days   |
+| Git HEAD     | `.git/HEAD` modification time           | 14 days   |
+| Lock Files   | `package-lock.json`, `Cargo.lock`, etc. | 14 days   |
+| Source Files | `.rs`, `.js`, `.ts`, `.py` modification | 14 days   |
+
 
 **Code:** `src/project.rs:96-166`
 
@@ -171,21 +174,25 @@ pub fn to_long_path(path: &Path) -> PathBuf {
 
 All deletions use the `trash` crate to move files to the Recycle Bin:
 
-| Operation | Default Behavior | Permanent Deletion |
-|-----------|------------------|-------------------|
-| CLI Clean | Recycle Bin | `--permanent` flag required |
-| TUI Clean | Recycle Bin | `[P]` key required |
-| Batch Clean | Recycle Bin | Explicit parameter |
+
+| Operation   | Default Behavior | Permanent Deletion          |
+| ----------- | ---------------- | --------------------------- |
+| CLI Clean   | Recycle Bin      | `--permanent` flag required |
+| TUI Clean   | Recycle Bin      | `[P]` key required          |
+| Batch Clean | Recycle Bin      | Explicit parameter          |
+
 
 **Code:** `src/cleaner.rs:718-742`
 
 ### Confirmation Requirements
 
-| Scenario | Confirmation Required |
-|----------|----------------------|
-| Any deletion | Yes (unless `-y` flag) |
-| Permanent deletion | Double confirmation in TUI |
-| Large operations | Item count and size displayed |
+
+| Scenario           | Confirmation Required         |
+| ------------------ | ----------------------------- |
+| Any deletion       | Yes (unless `-y` flag)        |
+| Permanent deletion | Double confirmation in TUI    |
+| Large operations   | Item count and size displayed |
+
 
 **Code:** `src/cleaner.rs:94-109`
 
@@ -203,12 +210,14 @@ Build artifacts (`node_modules`, `target/`, etc.) are only cleaned when:
 
 #### File Age Thresholds
 
-| Category | Default Threshold | Purpose |
-|----------|-------------------|---------|
-| Downloads | 30 days | Old files in Downloads folder |
-| Old Files | 30 days | Unused files in user directories |
-| Large Files | 100 MB | Files over size threshold |
-| Temp Files | 1 day | System temp directories |
+
+| Category    | Default Threshold | Purpose                          |
+| ----------- | ----------------- | -------------------------------- |
+| Downloads   | 30 days           | Old files in Downloads folder    |
+| Old Files   | 30 days           | Unused files in user directories |
+| Large Files | 100 MB            | Files over size threshold        |
+| Temp Files  | 1 day             | System temp directories          |
+
 
 **Code:** `src/config.rs:337-345`
 
@@ -327,14 +336,16 @@ Every deletion operation is logged:
 
 Sweep uses Rust's built-in test framework with integration tests.
 
-| Test Category | Key Tests |
-|---------------|-----------|
-| Long Path Support | `test_long_path_conversion`, `test_safe_metadata_on_regular_file` |
+
+| Test Category      | Key Tests                                                                   |
+| ------------------ | --------------------------------------------------------------------------- |
+| Long Path Support  | `test_long_path_conversion`, `test_safe_metadata_on_regular_file`           |
 | Symlink Protection | `test_should_skip_entry_regular_dir`, `test_should_skip_entry_regular_file` |
-| History Logging | `test_deletion_log_creation`, `test_deletion_log_add_success/failure` |
-| Config Exclusions | `test_config_exclusion_filtering`, `test_exclusion_patterns` |
-| Directory Size | `test_calculate_dir_size_empty`, `test_calculate_dir_size_with_files` |
-| Scanner | `test_scan_all_no_categories`, `test_scan_empty_directory` |
+| History Logging    | `test_deletion_log_creation`, `test_deletion_log_add_success/failure`       |
+| Config Exclusions  | `test_config_exclusion_filtering`, `test_exclusion_patterns`                |
+| Directory Size     | `test_calculate_dir_size_empty`, `test_calculate_dir_size_with_files`       |
+| Scanner            | `test_scan_all_no_categories`, `test_scan_empty_directory`                  |
+
 
 **Test Execution:**
 
@@ -347,22 +358,26 @@ cargo test --test integration_tests  # Run integration tests
 
 ### Static Analysis
 
-| Tool | Purpose | Status |
-|------|---------|--------|
+
+| Tool           | Purpose                        | Status           |
+| -------------- | ------------------------------ | ---------------- |
 | `cargo clippy` | Lint checks with `-D warnings` | ✅ Enforced in CI |
-| `cargo fmt` | Code formatting | ✅ Enforced in CI |
-| `cargo check` | Type checking | ✅ Enforced in CI |
+| `cargo fmt`    | Code formatting                | ✅ Enforced in CI |
+| `cargo check`  | Type checking                  | ✅ Enforced in CI |
+
 
 **Code:** `.github/workflows/build-release.yml:46-53`
 
 ### Compliance Standards
 
-| Standard | Implementation |
-|----------|----------------|
-| CWE-22 (Path Traversal) | Symlink/junction detection, system path blocklist |
-| CWE-59 (Link Following) | `should_skip_entry()` before traversal |
-| CWE-367 (TOCTOU Race) | Atomic operations, existence checks before deletion |
-| CWE-732 (Permissions) | User-scoped operations only, no admin required |
+
+| Standard                | Implementation                                      |
+| ----------------------- | --------------------------------------------------- |
+| CWE-22 (Path Traversal) | Symlink/junction detection, system path blocklist   |
+| CWE-59 (Link Following) | `should_skip_entry()` before traversal              |
+| CWE-367 (TOCTOU Race)   | Atomic operations, existence checks before deletion |
+| CWE-732 (Permissions)   | User-scoped operations only, no admin required      |
+
 
 ---
 
@@ -372,19 +387,21 @@ cargo test --test integration_tests  # Run integration tests
 
 All dependencies are pinned in `Cargo.lock` and vetted for security:
 
-| Crate | Version | Purpose | License |
-|-------|---------|---------|---------|
-| `trash` | 5.0 | Recycle Bin operations | MIT |
-| `walkdir` | 2.4 | Directory traversal | MIT/Unlicense |
-| `jwalk` | 0.8 | Parallel directory traversal | MIT |
-| `blake3` | 1.5 | Fast cryptographic hashing (duplicates) | CC0/Apache-2.0 |
-| `clap` | 4.5 | CLI argument parsing | MIT/Apache-2.0 |
-| `ratatui` | 0.29 | Terminal UI framework | MIT |
-| `chrono` | 0.4 | Date/time handling | MIT/Apache-2.0 |
-| `serde` | 1.0 | Serialization | MIT/Apache-2.0 |
-| `globset` | 0.4 | Glob pattern matching | MIT/Unlicense |
-| `memmap2` | 0.9 | Memory-mapped file I/O | MIT/Apache-2.0 |
-| `rayon` | 1.10 | Parallel iteration | MIT/Apache-2.0 |
+
+| Crate     | Version | Purpose                                 | License        |
+| --------- | ------- | --------------------------------------- | -------------- |
+| `trash`   | 5.0     | Recycle Bin operations                  | MIT            |
+| `walkdir` | 2.4     | Directory traversal                     | MIT/Unlicense  |
+| `jwalk`   | 0.8     | Parallel directory traversal            | MIT            |
+| `blake3`  | 1.5     | Fast cryptographic hashing (duplicates) | CC0/Apache-2.0 |
+| `clap`    | 4.5     | CLI argument parsing                    | MIT/Apache-2.0 |
+| `ratatui` | 0.29    | Terminal UI framework                   | MIT            |
+| `chrono`  | 0.4     | Date/time handling                      | MIT/Apache-2.0 |
+| `serde`   | 1.0     | Serialization                           | MIT/Apache-2.0 |
+| `globset` | 0.4     | Glob pattern matching                   | MIT/Unlicense  |
+| `memmap2` | 0.9     | Memory-mapped file I/O                  | MIT/Apache-2.0 |
+| `rayon`   | 1.10    | Parallel iteration                      | MIT/Apache-2.0 |
+
 
 **Supply Chain Security:**
 
@@ -397,12 +414,14 @@ All dependencies are pinned in `Cargo.lock` and vetted for security:
 
 ### Known Limitations
 
-| Limitation | Impact | Mitigation |
-|------------|--------|------------|
-| git2 removed | No git dirty detection | File-based git index checking |
-| No undo for permanent delete | Unrecoverable | Clear warnings, Recycle Bin default |
-| 14-day rule may delay cleanup | Orphaned artifacts remain | Manual `--project-age 0` override |
-| Windows-focused | Limited Unix support | Cross-platform utilities |
+
+| Limitation                    | Impact                    | Mitigation                          |
+| ----------------------------- | ------------------------- | ----------------------------------- |
+| git2 removed                  | No git dirty detection    | File-based git index checking       |
+| No undo for permanent delete  | Unrecoverable             | Clear warnings, Recycle Bin default |
+| 14-day rule may delay cleanup | Orphaned artifacts remain | Manual `--project-age 0` override   |
+| Windows-focused               | Limited Unix support      | Cross-platform utilities            |
+
 
 ---
 
@@ -442,7 +461,7 @@ The following are **never** targeted for deletion:
 
 1. **Always run `scan` first** to preview what will be cleaned
 2. **Use `--exclude` patterns** for important directories
-3. **Keep `default_permanent = false`** for Recycle Bin safety
+3. **Keep `default_permanent = false**` for Recycle Bin safety
 4. **Review deletion logs** in `%LOCALAPPDATA%\wole\history\`
 
 ### For Contributors
@@ -456,8 +475,8 @@ The following are **never** targeted for deletion:
 
 **Commitment:** This audit certifies that Sweep implements defense-in-depth security practices and prioritizes user data safety above all else. We default to non-destructive operations and require explicit user action for permanent deletions.
 
-*For security concerns or vulnerability reports, please open an issue at https://github.com/jpaulpoliquit/wole/issues*
+*For security concerns or vulnerability reports, please open an issue at [https://github.com/jpaulpoliquit/wole/issues*](https://github.com/jpaulpoliquit/wole/issues)
 
 ---
 
-*Last Updated: January 10, 2026*
+*Last Updated: January , 202509*
