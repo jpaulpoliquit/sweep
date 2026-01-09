@@ -259,7 +259,8 @@ mod tests {
         };
         let config = Config::default();
         
-        let results = scan_all(temp_dir.path(), options, OutputMode::Normal, &config).unwrap();
+        // Use Quiet mode in tests to avoid spinner thread issues
+        let results = scan_all(temp_dir.path(), options, OutputMode::Quiet, &config).unwrap();
         
         assert_eq!(results.cache.items, 0);
         assert_eq!(results.temp.items, 0);

@@ -34,11 +34,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
@@ -70,11 +70,11 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
@@ -100,25 +100,36 @@ jobs:
         uses: actions/cache@v4
         with:
           path: |
-            ~/.cargo/bin/
-            ~/.cargo/registry/index/
-            ~/.cargo/registry/cache/
-            ~/.cargo/git/db/
-            target/
+            ~/.cargo/bin
+            ~/.cargo/registry/index
+            ~/.cargo/registry/cache
+            ~/.cargo/git/db
+            target
           key: ${{ runner.os }}-cargo-${{ hashFiles('**/Cargo.lock') }}
           restore-keys: |
             ${{ runner.os }}-cargo-
       
       - name: Build release binary
         run: cargo build --release --verbose
+        continue-on-error: false
       
       - name: Verify binary exists
         run: |
-          if (Test-Path "target\release\sweeper.exe") {
+          $binaryPath = "target\release\sweeper.exe"
+          if (Test-Path $binaryPath) {
             Write-Host "Binary built successfully"
-            Get-Item "target\release\sweeper.exe" | Select-Object Name, Length, LastWriteTime
+            $file = Get-Item $binaryPath
+            Write-Host "Name: $($file.Name)"
+            Write-Host "Size: $([math]::Round($file.Length / 1MB, 2)) MB"
+            Write-Host "LastWriteTime: $($file.LastWriteTime)"
           } else {
-            Write-Error "Binary not found!"
+            Write-Error "Binary not found at: $binaryPath"
+            Write-Host "Contents of target\release:"
+            if (Test-Path "target\release") {
+              Get-ChildItem "target\release" | Format-Table Name, Length, LastWriteTime
+            } else {
+              Write-Host "target\release directory does not exist"
+            }
             exit 1
           }
       
@@ -126,14 +137,14 @@ jobs:
         uses: actions/upload-artifact@v4
         with:
           name: sweeper-windows-x64
-          path: target/release/sweeper.exe
+          path: target\release\sweeper.exe
           retention-days: 7
       
       - name: Create Release
         if: startsWith(github.ref, 'refs/tags/v')
         uses: softprops/action-gh-release@v1
         with:
-          files: target/release/sweeper.exe
+          files: target\release\sweeper.exe
           name: Release ${{ github.ref_name }}
           body: |
             ## Changes

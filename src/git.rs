@@ -67,8 +67,12 @@ pub fn find_git_root_cached(path: &Path) -> Option<PathBuf> {
 /// Find the git root directory by walking up from the given path
 /// 
 /// Prefer find_git_root_cached() for performance in scan loops
+/// 
+/// Limits traversal depth to prevent issues with extremely deep paths
 pub fn find_git_root(path: &Path) -> Option<PathBuf> {
     let mut current = path.to_path_buf();
+    let mut depth = 0;
+    const MAX_DEPTH: usize = 200; // Reasonable limit for directory depth
     
     loop {
         let git_dir = current.join(".git");
@@ -77,6 +81,12 @@ pub fn find_git_root(path: &Path) -> Option<PathBuf> {
         }
         
         if !current.pop() {
+            break;
+        }
+        
+        depth += 1;
+        if depth > MAX_DEPTH {
+            // Prevent infinite loops or extremely deep traversal
             break;
         }
     }

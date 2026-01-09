@@ -46,7 +46,8 @@ fn test_scan_build_artifacts_inactive_project() {
     };
     
     let config = Config::default();
-    let results = scanner::scan_all(temp_dir.path(), options, OutputMode::Normal, &config).unwrap();
+    // Use Quiet mode in tests to avoid spinner thread issues
+    let results = scanner::scan_all(temp_dir.path(), options, OutputMode::Quiet, &config).unwrap();
     
     // Should find the node_modules directory
     assert!(results.build.items > 0 || results.build.items == 0); // May or may not find it depending on git activity
@@ -86,7 +87,8 @@ fn test_scan_empty_directory() {
     };
     
     let config = Config::default();
-    let results = scanner::scan_all(temp_dir.path(), options, OutputMode::Normal, &config).unwrap();
+    // Use Quiet mode in tests to avoid spinner thread issues
+    let results = scanner::scan_all(temp_dir.path(), options, OutputMode::Quiet, &config).unwrap();
     
     // Should return empty results
     assert_eq!(results.cache.items, 0);

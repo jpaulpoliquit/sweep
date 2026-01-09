@@ -74,7 +74,10 @@ pub fn scan(_root: &Path) -> Result<DuplicatesResult> {
             continue;
         }
         
+        // Limit depth to prevent stack overflow, especially on Windows with smaller stack size
+        const MAX_DEPTH: usize = 100;
         for entry in WalkDir::new(&dir)
+            .max_depth(MAX_DEPTH)
             .follow_links(false)
             .into_iter()
             .filter_entry(|e| !should_skip_entry(e))
