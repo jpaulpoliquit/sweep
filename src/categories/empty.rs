@@ -10,7 +10,7 @@ use walkdir::WalkDir;
 /// 
 /// An empty folder is one that contains no files (recursively).
 /// Folders that only contain other empty folders are also considered empty.
-pub fn scan(root: &Path) -> Result<CategoryResult> {
+pub fn scan(_root: &Path) -> Result<CategoryResult> {
     let mut result = CategoryResult::default();
     let mut paths = Vec::new();
     

@@ -60,7 +60,7 @@ impl DuplicatesResult {
 /// 1. Group files by size (files with unique sizes cannot be duplicates)
 /// 2. For size groups > 1, compute partial hash (first 4KB)
 /// 3. For partial hash matches, compute full hash
-pub fn scan(root: &Path) -> Result<DuplicatesResult> {
+pub fn scan(_root: &Path) -> Result<DuplicatesResult> {
     let mut result = DuplicatesResult::default();
     
     // Get user directories to scan
@@ -114,7 +114,7 @@ pub fn scan(root: &Path) -> Result<DuplicatesResult> {
     // Step 2: For files with same size, compute partial hash
     let mut partial_hash_groups: HashMap<String, Vec<PathBuf>> = HashMap::new();
     
-    for (size, paths) in size_groups {
+    for (_size, paths) in size_groups {
         // Only check groups with more than one file
         if paths.len() < 2 {
             continue;
@@ -139,7 +139,7 @@ pub fn scan(root: &Path) -> Result<DuplicatesResult> {
     // Step 3: For partial hash matches, compute full hash
     let mut full_hash_groups: HashMap<String, Vec<PathBuf>> = HashMap::new();
     
-    for (partial_hash, paths) in partial_hash_groups {
+    for (_partial_hash, paths) in partial_hash_groups {
         // Only check groups with more than one file
         if paths.len() < 2 {
             continue;

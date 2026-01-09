@@ -1,5 +1,5 @@
 use crate::output::CategoryResult;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
 use std::env;
 use std::path::{Path, PathBuf};

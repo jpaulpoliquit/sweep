@@ -287,17 +287,18 @@ impl Cli {
         };
         
         match self.command {
-            Commands::Scan { all, cache, temp, trash, build, downloads, large, old, browser, system, empty, duplicates, path, json, project_age, min_age, min_size, exclude } => {
+            Commands::Scan { all, cache, temp, trash, build, downloads, large, old, path, json, project_age, min_age, min_size, exclude } => {
                 // --all enables all categories
                 let (cache, temp, trash, build, downloads, large, old, browser, system, empty, duplicates) = if all {
                     (true, true, true, true, true, true, true, true, true, true, true)
-                } else if !cache && !temp && !trash && !build && !downloads && !large && !old && !browser && !system && !empty && !duplicates {
+                } else if !cache && !temp && !trash && !build && !downloads && !large && !old {
                     // No categories specified - show help message
                     eprintln!("No categories specified. Use --all or specify categories like --cache, --temp, --build");
                     eprintln!("Run 'sweeper scan --help' for more information.");
                     return Ok(());
                 } else {
-                    (cache, temp, trash, build, downloads, large, old, browser, system, empty, duplicates)
+                    // Scan command doesn't support browser, system, empty, duplicates
+                    (cache, temp, trash, build, downloads, large, old, false, false, false, false)
                 };
                 
                 let scan_path = path.unwrap_or_else(|| {

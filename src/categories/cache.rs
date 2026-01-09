@@ -36,7 +36,7 @@ pub fn scan(_root: &Path) -> Result<CategoryResult> {
     let local_appdata = env::var("LOCALAPPDATA").ok().map(PathBuf::from);
     let userprofile = env::var("USERPROFILE").ok().map(PathBuf::from);
     
-    for (name, location) in CACHE_LOCATIONS {
+    for (_name, location) in CACHE_LOCATIONS {
         let cache_path = match location {
             CacheLocation::LocalAppData(subpath) => {
                 local_appdata.as_ref().map(|p| p.join(subpath))

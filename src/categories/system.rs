@@ -4,7 +4,6 @@ use anyhow::{Context, Result};
 use trash;
 use std::env;
 use std::path::{Path, PathBuf};
-use walkdir::WalkDir;
 
 /// Scan for Windows system cache files
 /// 

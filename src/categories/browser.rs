@@ -28,7 +28,7 @@ pub fn scan(_root: &Path) -> Result<CategoryResult> {
     
     // Scan Chrome and Edge caches (fixed paths)
     if let Some(ref local_appdata_path) = local_appdata {
-        for (name, subpaths) in BROWSER_CACHES {
+        for (_name, subpaths) in BROWSER_CACHES {
             let mut cache_path = local_appdata_path.clone();
             for subpath in *subpaths {
                 cache_path = cache_path.join(subpath);

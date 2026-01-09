@@ -57,7 +57,7 @@ pub fn scan(_root: &Path, min_age_days: u64) -> Result<CategoryResult> {
                             }
                         }
                     }
-                    Err(e) if e.kind() == std::io::ErrorKind::PermissionDenied => {
+                    Err(e) if e.io_error().map(|io_err| io_err.kind() == std::io::ErrorKind::PermissionDenied).unwrap_or(false) => {
                         continue;
                     }
                     _ => {}
