@@ -1,6 +1,6 @@
 # Wole
 
-A Windows-first cleanup tool that safely removes unused files, caches, and system junk to free up disk space.
+A Windows-first cleanup tool  that safely removes unused files, caches, and system junk to free up disk space.
 
 [GitHub](https://github.com/jpaulpoliquit/wole)
 [License: MIT](LICENSE)
@@ -26,12 +26,6 @@ A comprehensive cleanup tool that handles caches, temp files, browser data, syst
 
 ```powershell
 irm https://raw.githubusercontent.com/jpaulpoliquit/wole/master/install.ps1 | iex
-```
-
-Or if the above doesn't work, try:
-
-```powershell
-irm https://raw.githubusercontent.com/jpaulpoliquit/wole/main/install.ps1 | iex
 ```
 
 **Manual:** Download from [GitHub Releases](https://github.com/jpaulpoliquit/wole/releases) and add to PATH.
@@ -636,8 +630,6 @@ Or: `cargo build --release`
 - **TUI not working:** Use PowerShell/Windows Terminal, or CLI mode: `wole scan --all`
 - **No items found:** Check project activity with `--project-age 0` or file ages with `--min-age 0`
 
-For build issues, see [build/BUILD_TROUBLESHOOTING.md](build/BUILD_TROUBLESHOOTING.md)
-
 ## License
 
-[MI](LICENSE)  
+[MIT](LICENSE)

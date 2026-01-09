@@ -4,13 +4,13 @@
 
 use std::fs;
 use std::path::PathBuf;
+use tempfile::TempDir;
 use wole::cli::ScanOptions;
 use wole::config::Config;
 use wole::history::{DeletionLog, DeletionRecord};
 use wole::output::OutputMode;
 use wole::scanner;
 use wole::utils;
-use tempfile::TempDir;
 
 fn create_test_dir() -> TempDir {
     tempfile::tempdir().unwrap()
@@ -126,11 +126,11 @@ fn test_config_cli_overrides() {
 fn test_long_path_conversion() {
     // Test that to_long_path adds the prefix correctly
     let normal_path = std::path::Path::new(r"C:\Users\test\file.txt");
-    let long_path = utils::to_long_path(normal_path);
+    let _long_path = utils::to_long_path(normal_path);
 
     #[cfg(windows)]
     {
-        let path_str = long_path.to_str().unwrap();
+        let path_str = _long_path.to_str().unwrap();
         assert!(
             path_str.starts_with(r"\\?\"),
             "Path should start with \\\\?\\"

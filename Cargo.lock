@@ -1117,34 +1117,6 @@ dependencies = [
 ]
 
 [[package]]
-name = "wole"
-version = "0.1.0"
-dependencies = [
- "anyhow",
- "blake3",
- "bytesize",
- "chrono",
- "clap",
- "colored",
- "crossterm",
- "directories",
- "globset",
- "indicatif",
- "jwalk",
- "lazy_static",
- "memmap2",
- "ratatui",
- "rayon",
- "serde",
- "serde_json",
- "tempfile",
- "thiserror",
- "toml",
- "trash",
- "walkdir",
-]
-
-[[package]]
 name = "syn"
 version = "2.0.114"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1679,6 +1651,34 @@ name = "wit-bindgen"
 version = "0.46.0"
 source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "f17a85883d4e6d00e8a97c586de764dabcc06133f7f1d55dce5cdc070ad7fe59"
+
+[[package]]
+name = "wole"
+version = "0.1.0"
+dependencies = [
+ "anyhow",
+ "blake3",
+ "bytesize",
+ "chrono",
+ "clap",
+ "colored",
+ "crossterm",
+ "directories",
+ "globset",
+ "indicatif",
+ "jwalk",
+ "lazy_static",
+ "memmap2",
+ "ratatui",
+ "rayon",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "thiserror",
+ "toml",
+ "trash",
+ "walkdir",
+]
 
 [[package]]
 name = "zmij"

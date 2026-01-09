@@ -1,0 +1,24 @@
+# Code Owners
+# This file defines who is automatically requested for review when code in certain paths is changed.
+# See: https://docs.github.com/en/repositories/managing-your-repositorys-settings-and-features/customizing-your-repository/about-code-owners
+
+# Global default owner
+* @jpaulpoliquit
+
+# Core source code
+/src/ @jpaulpoliquit
+
+# CI/CD and GitHub workflows
+/.github/ @jpaulpoliquit
+
+# Build configuration
+/build.rs @jpaulpoliquit
+/Cargo.toml @jpaulpoliquit
+
+# Documentation
+/README.md @jpaulpoliquit
+/CONTRIBUTING.md @jpaulpoliquit
+/docs/ @jpaulpoliquit
+
+# Installation scripts
+/install.* @jpaulpoliquit

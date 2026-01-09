@@ -334,10 +334,7 @@ impl Cli {
     /// Show interactive menu when no command is provided
     pub fn show_interactive_menu() {
         println!();
-        println!(
-            "{}",
-            Theme::header("Wole - Reclaim Disk Space on Windows")
-        );
+        println!("{}", Theme::header("Wole - Reclaim Disk Space on Windows"));
         println!("{}", Theme::divider_bold(60));
         println!();
         println!("{}", Theme::primary("Available Commands:"));
@@ -390,10 +387,7 @@ impl Cli {
         println!();
         println!("{}", Theme::primary("Quick Examples:"));
         println!();
-        println!(
-            "  {} Launch interactive TUI mode",
-            Theme::command("wole")
-        );
+        println!("  {} Launch interactive TUI mode", Theme::command("wole"));
         println!(
             "  {} Scan all categories",
             Theme::command("wole scan --all")
