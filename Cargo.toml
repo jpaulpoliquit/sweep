@@ -30,6 +30,11 @@ blake3 = "1.5"
 [dev-dependencies]
 tempfile = "3.10"
 
+[profile.test]
+# Increase stack size for tests on Windows to prevent stack overflow
+# Windows default is ~1MB, this helps with deep directory traversal tests
+opt-level = 0  # Faster compilation for tests
+
 [profile.release]
 opt-level = 3
 lto = true

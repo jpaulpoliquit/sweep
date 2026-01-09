@@ -1,0 +1,11 @@
+# Cargo configuration
+# This file helps configure Rust for Windows builds
+
+[target.x86_64-pc-windows-msvc]
+# If you have Visual Studio Build Tools, uncomment and set the path to link.exe
+# linker = "C:\\Program Files\\Microsoft Visual Studio\\2022\\BuildTools\\VC\\Tools\\MSVC\\<version>\\bin\\Hostx64\\x64\\link.exe"
+
+[build]
+# Increase stack size for test executables on Windows (helps prevent stack overflow)
+# Note: This requires setting RUSTFLAGS environment variable instead
+# RUSTFLAGS="-C link-arg=/STACK:2097152" cargo test  # 2MB stack

@@ -12,10 +12,15 @@ use walkdir::WalkDir;
 /// - Skip permission-denied errors gracefully
 /// - NOT walk into .git directories (just count the directory itself)
 /// - Handle symlinks safely (don't follow)
+/// - Limit depth to prevent stack overflow on Windows
 pub fn calculate_dir_size(path: &Path) -> u64 {
     let mut total = 0u64;
     
+    // Limit depth to prevent stack overflow, especially on Windows with smaller stack size
+    const MAX_DEPTH: usize = 100;
+    
     for entry in WalkDir::new(path)
+        .max_depth(MAX_DEPTH)
         .follow_links(false)
         .into_iter()
         .filter_entry(|e| !should_skip_for_size(e))
@@ -283,6 +288,9 @@ mod tests {
         use walkdir::WalkDir;
         let temp_dir = tempfile::tempdir().unwrap();
         
+        // Ensure we're using the temp directory
+        assert!(temp_dir.path().exists());
+        
         // Create a node_modules directory
         let node_modules = temp_dir.path().join("node_modules");
         fs::create_dir_all(&node_modules).unwrap();
@@ -296,13 +304,16 @@ mod tests {
         fs::create_dir_all(&normal_dir).unwrap();
         
         let mut entries: Vec<String> = Vec::new();
+        // Use a very limited depth to prevent any stack issues
         for entry in WalkDir::new(temp_dir.path())
-            .max_depth(1)
+            .max_depth(2)  // Increased from 1 to allow subdirectories but still safe
             .into_iter()
             .filter_entry(|e| !should_skip_walk(e))
         {
             if let Ok(e) = entry {
-                entries.push(e.path().file_name().unwrap().to_string_lossy().to_string());
+                if let Some(name) = e.path().file_name() {
+                    entries.push(name.to_string_lossy().to_string());
+                }
             }
         }
         
@@ -334,6 +345,8 @@ mod tests {
         fs::write(&file1, "hello").unwrap();
         fs::write(&file2, "world").unwrap();
         
+        // Ensure we're using the temp directory, not accidentally walking system paths
+        assert!(temp_dir.path().exists());
         let size = calculate_dir_size(temp_dir.path());
         assert_eq!(size, 10); // 5 + 5 bytes
     }
