@@ -86,6 +86,7 @@ jobs:
     name: Build Windows Binaries
     runs-on: windows-latest
     needs: [check, test]
+    if: startsWith(github.ref, 'refs/tags/v')
     strategy:
       matrix:
         target:
@@ -205,6 +206,8 @@ jobs:
     runs-on: windows-latest
     needs: build
     if: startsWith(github.ref, 'refs/tags/v')
+    permissions:
+      contents: write
     
     steps:
       - name: Checkout repository
@@ -231,7 +234,7 @@ jobs:
             
             **PowerShell (Recommended):**
             ```powershell
-            irm https://raw.githubusercontent.com/${{ github.repository }}/main/install.ps1 | iex
+            irm https://raw.githubusercontent.com/${{ github.repository }}/master/install.ps1 | iex
             ```
             
             **Manual:** Download the appropriate zip for your architecture:

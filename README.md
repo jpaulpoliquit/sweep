@@ -25,6 +25,11 @@ A comprehensive cleanup tool that handles caches, temp files, browser data, syst
 **PowerShell:**
 
 ```powershell
+irm https://raw.githubusercontent.com/jpaulpoliquit/sweeper/master/install.ps1 | iex
+```
+
+Or if the above doesn't work, try:
+```powershell
 irm https://raw.githubusercontent.com/jpaulpoliquit/sweeper/main/install.ps1 | iex
 ```
 

@@ -810,7 +810,7 @@ fn perform_restore(
             prog.current_path = Some(std::path::PathBuf::from(relative_path_str));
         }
 
-        // Try to find in Recycle Bin
+        // Try to find exact match first (for files)
         if let Some(trash_item) = bin_map.get(&normalized_record_path) {
             match restore::restore_file(trash_item) {
                 Ok(()) => {
@@ -841,15 +841,64 @@ fn perform_restore(
                 }
             }
         } else {
-            result.not_found += 1;
+            // No exact match - check if this was a directory
+            // When a directory is deleted, Windows Recycle Bin stores individual files,
+            // not the directory itself. So we need to find all items whose path starts
+            // with the directory path.
+            let normalized_record_path_with_sep = if normalized_record_path.ends_with('/') {
+                normalized_record_path.clone()
+            } else {
+                format!("{}/", normalized_record_path)
+            };
 
-            // Update progress
-            if let crate::tui::state::Screen::Restore {
-                progress: Some(ref mut prog),
-                ..
-            } = app_state.screen
-            {
-                prog.not_found = result.not_found;
+            // Find all Recycle Bin items that are children of this directory
+            let mut found_any = false;
+            let mut restored_count = 0;
+            let mut restore_errors = 0;
+
+            for (bin_path, trash_item) in &bin_map {
+                // Check if this Recycle Bin item is inside the directory we're restoring
+                if bin_path.starts_with(&normalized_record_path_with_sep) {
+                    found_any = true;
+                    match restore::restore_file(trash_item) {
+                        Ok(()) => {
+                            restored_count += 1;
+                        }
+                        Err(_e) => {
+                            restore_errors += 1;
+                        }
+                    }
+                }
+            }
+
+            if found_any {
+                if restored_count > 0 {
+                    result.restored += 1; // Count as one directory restored
+                    result.restored_bytes += record.size_bytes; // Use the logged size
+                }
+                result.errors += restore_errors;
+
+                // Update progress
+                if let crate::tui::state::Screen::Restore {
+                    progress: Some(ref mut prog),
+                    ..
+                } = app_state.screen
+                {
+                    prog.restored = result.restored;
+                    prog.restored_bytes = result.restored_bytes;
+                    prog.errors = result.errors;
+                }
+            } else {
+                result.not_found += 1;
+
+                // Update progress
+                if let crate::tui::state::Screen::Restore {
+                    progress: Some(ref mut prog),
+                    ..
+                } = app_state.screen
+                {
+                    prog.not_found = result.not_found;
+                }
             }
         }
 

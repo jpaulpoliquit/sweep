@@ -129,7 +129,7 @@ pub fn restore_from_log_with_progress(
             )?;
         }
 
-        // Try to find in Recycle Bin using normalized path
+        // Try to find exact match first (for files)
         if let Some(trash_item) = bin_map.get(&normalized_record_path) {
             match restore_file(trash_item) {
                 Ok(()) => {
@@ -156,14 +156,76 @@ pub fn restore_from_log_with_progress(
                 }
             }
         } else {
-            // File not found in Recycle Bin (may have been permanently deleted or already restored)
-            result.not_found += 1;
-            if output_mode == crate::output::OutputMode::VeryVerbose {
-                println!(
-                    "{} Not found in Recycle Bin: {}",
-                    Theme::muted("?"),
-                    Theme::secondary(&record.path)
-                );
+            // No exact match - check if this was a directory
+            // When a directory is deleted, Windows Recycle Bin stores individual files,
+            // not the directory itself. So we need to find all items whose path starts
+            // with the directory path.
+            let normalized_record_path_with_sep = if normalized_record_path.ends_with('/') {
+                normalized_record_path.clone()
+            } else {
+                format!("{}/", normalized_record_path)
+            };
+
+            // Find all Recycle Bin items that are children of this directory
+            let mut found_any = false;
+            let mut restored_count = 0;
+            let mut restore_errors = 0;
+
+            for (bin_path, trash_item) in &bin_map {
+                // Check if this Recycle Bin item is inside the directory we're restoring
+                if bin_path.starts_with(&normalized_record_path_with_sep) {
+                    found_any = true;
+                    match restore_file(trash_item) {
+                        Ok(()) => {
+                            restored_count += 1;
+                            // Size tracking removed - TrashItem doesn't expose size
+                            // Final size will use record.size_bytes (see line 210)
+                        }
+                        Err(e) => {
+                            restore_errors += 1;
+                            if output_mode != crate::output::OutputMode::Quiet {
+                                eprintln!(
+                                    "{} Failed to restore {}: {}",
+                                    Theme::error("✗"),
+                                    Theme::secondary(
+                                        &trash_item
+                                            .original_parent
+                                            .join(&trash_item.name)
+                                            .display()
+                                            .to_string()
+                                    ),
+                                    Theme::error(&e.to_string())
+                                );
+                            }
+                        }
+                    }
+                }
+            }
+
+            if found_any {
+                if restored_count > 0 {
+                    result.restored += 1; // Count as one directory restored
+                    result.restored_bytes += record.size_bytes; // Use the logged size
+                    if output_mode != crate::output::OutputMode::Quiet {
+                        println!(
+                            "{} Restored directory: {} ({} items)",
+                            Theme::success("✓"),
+                            Theme::secondary(&record.path),
+                            restored_count
+                        );
+                    }
+                }
+                result.errors += restore_errors;
+            } else {
+                // File/directory not found in Recycle Bin (may have been permanently deleted or already restored)
+                result.not_found += 1;
+                if output_mode == crate::output::OutputMode::VeryVerbose {
+                    println!(
+                        "{} Not found in Recycle Bin: {}",
+                        Theme::muted("?"),
+                        Theme::secondary(&record.path)
+                    );
+                }
             }
         }
     }
@@ -189,15 +251,28 @@ pub fn restore_path(path: &Path, output_mode: crate::output::OutputMode) -> Resu
     // Get current Recycle Bin contents
     let recycle_bin_items = os_limited::list().context("Failed to list Recycle Bin contents")?;
 
-    let path_str = path.display().to_string().to_lowercase();
+    let normalized_path = normalize_path_for_comparison(&path.display().to_string());
+    let normalized_path_with_sep = if normalized_path.ends_with('/') {
+        normalized_path.clone()
+    } else {
+        format!("{}/", normalized_path)
+    };
 
-    // Find matching item in Recycle Bin
+    // First try exact match (for files)
     for item in &recycle_bin_items {
         let original_path = item.original_parent.join(&item.name);
-        if original_path.display().to_string().to_lowercase() == path_str {
+        let normalized_original =
+            normalize_path_for_comparison(&original_path.display().to_string());
+
+        if normalized_original == normalized_path {
+            let restored_path = item.original_parent.join(&item.name);
             match restore_file(item) {
                 Ok(()) => {
                     result.restored = 1;
+                    // Get file size from restored file
+                    result.restored_bytes = std::fs::metadata(&restored_path)
+                        .map(|m| m.len())
+                        .unwrap_or(0);
                     if output_mode != crate::output::OutputMode::Quiet {
                         println!(
                             "{} Restored: {}",
@@ -218,43 +293,73 @@ pub fn restore_path(path: &Path, output_mode: crate::output::OutputMode) -> Resu
         }
     }
 
-    // Also check if path matches any part of the Recycle Bin item path
+    // No exact match - check if this is a directory
+    // Find all Recycle Bin items that are children of this directory
+    let mut found_any = false;
+    let mut restored_count = 0;
+    let mut restored_bytes = 0u64;
+    let mut restore_errors = Vec::new();
+
     for item in &recycle_bin_items {
         let original_path = item.original_parent.join(&item.name);
-        if original_path
-            .display()
-            .to_string()
-            .to_lowercase()
-            .contains(&path_str)
-            || path_str.contains(&original_path.display().to_string().to_lowercase())
-        {
+        let normalized_original =
+            normalize_path_for_comparison(&original_path.display().to_string());
+
+        // Check if this Recycle Bin item is inside the directory we're restoring
+        if normalized_original.starts_with(&normalized_path_with_sep) {
+            found_any = true;
+            let restored_path = item.original_parent.join(&item.name);
             match restore_file(item) {
                 Ok(()) => {
-                    result.restored = 1;
-                    if output_mode != crate::output::OutputMode::Quiet {
-                        println!(
-                            "{} Restored: {}",
-                            Theme::success("✓"),
-                            Theme::secondary(&original_path.display().to_string())
-                        );
-                    }
-                    return Ok(result);
+                    restored_count += 1;
+                    // Get file size from restored file
+                    restored_bytes += std::fs::metadata(&restored_path)
+                        .map(|m| m.len())
+                        .unwrap_or(0);
                 }
                 Err(e) => {
-                    return Err(anyhow::anyhow!(
-                        "Failed to restore {}: {}",
-                        original_path.display(),
-                        e
-                    ));
+                    restore_errors.push((original_path.clone(), e));
                 }
             }
         }
     }
 
-    Err(anyhow::anyhow!(
-        "File not found in Recycle Bin: {}",
-        path.display()
-    ))
+    if found_any {
+        if restored_count > 0 {
+            result.restored = 1; // Count as one directory restored
+            result.restored_bytes = restored_bytes;
+            if output_mode != crate::output::OutputMode::Quiet {
+                println!(
+                    "{} Restored directory: {} ({} items)",
+                    Theme::success("✓"),
+                    Theme::secondary(&path.display().to_string()),
+                    restored_count
+                );
+            }
+        }
+
+        // Report errors if any
+        if !restore_errors.is_empty() {
+            result.errors = restore_errors.len();
+            if output_mode != crate::output::OutputMode::Quiet {
+                for (error_path, error) in &restore_errors {
+                    eprintln!(
+                        "{} Failed to restore {}: {}",
+                        Theme::error("✗"),
+                        Theme::secondary(&error_path.display().to_string()),
+                        Theme::error(&error.to_string())
+                    );
+                }
+            }
+        }
+
+        Ok(result)
+    } else {
+        Err(anyhow::anyhow!(
+            "File or directory not found in Recycle Bin: {}",
+            path.display()
+        ))
+    }
 }
 
 /// Restore a single file from Recycle Bin
