@@ -125,7 +125,11 @@ try {
     Write-Host "Installed to $TARGET_PATH" -ForegroundColor Green
     
     # Add to PATH
-    $INSTALL_DIR_NORMALIZED = [System.IO.Path]::GetFullPath($INSTALL_DIR).TrimEnd('\', '/')
+    try {
+        $INSTALL_DIR_NORMALIZED = [System.IO.Path]::GetFullPath($INSTALL_DIR).TrimEnd('\', '/')
+    } catch {
+        $INSTALL_DIR_NORMALIZED = $INSTALL_DIR.TrimEnd('\', '/')
+    }
     $CURRENT_PATH = [Environment]::GetEnvironmentVariable("Path", "User")
     
     # Check if already in PATH (case-insensitive, handle trailing slashes)
@@ -133,7 +137,12 @@ try {
     if (-not [string]::IsNullOrWhiteSpace($CURRENT_PATH)) {
         $pathEntries = $CURRENT_PATH -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
         foreach ($entry in $pathEntries) {
-            $normalizedEntry = [System.IO.Path]::GetFullPath($entry.Trim()).TrimEnd('\', '/')
+            try {
+                $normalizedEntry = [System.IO.Path]::GetFullPath($entry.Trim()).TrimEnd('\', '/')
+            } catch {
+                # If GetFullPath fails (e.g., contains env vars), do simple comparison
+                $normalizedEntry = $entry.Trim().TrimEnd('\', '/')
+            }
             if ($normalizedEntry -eq $INSTALL_DIR_NORMALIZED) {
                 $pathAlreadyAdded = $true
                 break
@@ -155,27 +164,74 @@ try {
         Write-Host "Already in PATH" -ForegroundColor Gray
     }
     
-    # Refresh PATH in current session (handle null/empty values)
+    # Refresh PATH from registry first
     $machinePath = [System.Environment]::GetEnvironmentVariable("Path", "Machine")
     $userPath = [System.Environment]::GetEnvironmentVariable("Path", "User")
     
-    $newSessionPath = @()
+    $registryPathParts = @()
     if (-not [string]::IsNullOrWhiteSpace($machinePath)) {
-        $newSessionPath += $machinePath
+        $registryPathParts += $machinePath
     }
     if (-not [string]::IsNullOrWhiteSpace($userPath)) {
-        $newSessionPath += $userPath
+        $registryPathParts += $userPath
     }
     
-    if ($newSessionPath.Count -gt 0) {
-        $env:Path = $newSessionPath -join ';'
-    } elseif (-not [string]::IsNullOrWhiteSpace($env:Path)) {
-        # Keep existing PATH if registry is empty (shouldn't happen, but be safe)
-        Write-Warning "Could not refresh PATH from registry, keeping current session PATH"
+    if ($registryPathParts.Count -gt 0) {
+        $registryPath = $registryPathParts -join ';'
+        $env:Path = $registryPath
     }
+    
+    # Always ensure install directory is in current session PATH (double-check and add if needed)
+    $currentSessionPath = $env:Path
+    $inSessionPath = $false
+    
+    if (-not [string]::IsNullOrWhiteSpace($currentSessionPath)) {
+        $sessionPathEntries = $currentSessionPath -split ';' | Where-Object { -not [string]::IsNullOrWhiteSpace($_) }
+        foreach ($entry in $sessionPathEntries) {
+            try {
+                $normalizedEntry = [System.IO.Path]::GetFullPath($entry.Trim()).TrimEnd('\', '/')
+            } catch {
+                # If GetFullPath fails (e.g., contains env vars), do simple comparison
+                $normalizedEntry = $entry.Trim().TrimEnd('\', '/')
+            }
+            if ($normalizedEntry -eq $INSTALL_DIR_NORMALIZED) {
+                $inSessionPath = $true
+                break
+            }
+        }
+    }
+    
+    if (-not $inSessionPath) {
+        # Add to current session PATH (guarantees immediate availability)
+        if ([string]::IsNullOrWhiteSpace($currentSessionPath)) {
+            $env:Path = $INSTALL_DIR_NORMALIZED
+        } else {
+            $env:Path = "$currentSessionPath;$INSTALL_DIR_NORMALIZED"
+        }
+    }
+    
+    # Verify installation
+    $exeExists = Test-Path $TARGET_PATH
+    $pathContainsDir = $env:Path -split ';' | Where-Object { 
+        try {
+            $normalized = [System.IO.Path]::GetFullPath($_.Trim()).TrimEnd('\', '/')
+            $normalized -eq $INSTALL_DIR_NORMALIZED
+        } catch {
+            $_.Trim().TrimEnd('\', '/') -eq $INSTALL_DIR_NORMALIZED
+        }
+    } | Select-Object -First 1
     
     Write-Host ""
-    Write-Host "✓ sweeper installed successfully!" -ForegroundColor Green
+    if ($exeExists) {
+        Write-Host "✓ sweeper installed successfully!" -ForegroundColor Green
+        if ($pathContainsDir) {
+            Write-Host "✓ PATH updated - sweeper should be available immediately" -ForegroundColor Green
+        } else {
+            Write-Host "⚠ PATH may need a terminal restart" -ForegroundColor Yellow
+        }
+    } else {
+        Write-Host "✗ Installation may have failed - executable not found" -ForegroundColor Red
+    }
     Write-Host ""
     Write-Host "Run 'sweeper --help' to get started." -ForegroundColor Cyan
     
