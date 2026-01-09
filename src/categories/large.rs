@@ -189,10 +189,7 @@ fn scan_directory(
 
     // Move collected files to output
     // Use Arc::try_unwrap to get the inner Mutex, then into_inner to get the Vec
-    let mut collected = Arc::try_unwrap(found_files)
-        .unwrap()
-        .into_inner()
-        .unwrap();
+    let mut collected = Arc::try_unwrap(found_files).unwrap().into_inner().unwrap();
     files.append(&mut collected);
 
     Ok(())
