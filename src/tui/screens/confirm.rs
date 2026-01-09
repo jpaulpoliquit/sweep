@@ -271,7 +271,42 @@ fn render_file_list(f: &mut Frame, area: Rect, app_state: &mut AppState) {
             Styles::secondary(),
         )]));
         f.render_widget(empty, inner);
+        app_state.cursor = 0;
+        app_state.scroll_offset = 0;
         return;
+    }
+
+    // Validate cursor position - ensure it's within bounds
+    let max_row = rows.len().saturating_sub(1);
+    if app_state.cursor > max_row {
+        app_state.cursor = max_row;
+    }
+
+    // Also ensure cursor doesn't point to a Spacer row (not selectable)
+    if let Some(row) = rows.get(app_state.cursor) {
+        if matches!(row, crate::tui::state::ConfirmRow::Spacer) {
+            // Move cursor to nearest non-spacer row
+            let mut new_cursor = app_state.cursor;
+            // Try moving down first
+            for (i, row) in rows.iter().enumerate().skip(app_state.cursor + 1) {
+                if !matches!(row, crate::tui::state::ConfirmRow::Spacer) {
+                    new_cursor = i;
+                    break;
+                }
+            }
+            // If nothing found below, try moving up
+            if new_cursor == app_state.cursor {
+                if let Some((i, _)) = rows
+                    .iter()
+                    .enumerate()
+                    .take(app_state.cursor)
+                    .rfind(|(_, row)| !matches!(row, crate::tui::state::ConfirmRow::Spacer))
+                {
+                    new_cursor = i;
+                }
+            }
+            app_state.cursor = new_cursor.min(max_row);
+        }
     }
 
     // Get confirm category groups for rendering
@@ -495,10 +530,33 @@ fn render_file_list(f: &mut Frame, area: Rect, app_state: &mut AppState) {
     }
 
     // Handle scrolling - find the line index for current cursor
-    let cursor_line_idx = line_to_row
-        .iter()
-        .position(|&r| r == app_state.cursor)
-        .unwrap_or(0);
+    // If cursor points to a row that was skipped (missing item), find the nearest valid row
+    let (cursor_line_idx, cursor_adjusted) = if line_to_row.is_empty() {
+        (0, false)
+    } else {
+        // Try to find exact match first
+        if let Some(idx) = line_to_row.iter().position(|&r| r == app_state.cursor) {
+            (idx, false)
+        } else {
+            // Cursor points to a missing row - find the nearest valid row
+            // Find the last row index that's <= cursor, or first row index if none found
+            let mut best_idx = 0;
+            let mut best_row = 0;
+            for (line_idx, &row_idx) in line_to_row.iter().enumerate() {
+                if row_idx <= app_state.cursor && row_idx >= best_row {
+                    best_idx = line_idx;
+                    best_row = row_idx;
+                }
+            }
+            // Update cursor to point to the valid row we found
+            if best_row != app_state.cursor {
+                app_state.cursor = best_row;
+                (best_idx, true) // Mark that we adjusted the cursor
+            } else {
+                (best_idx, false)
+            }
+        }
+    };
 
     let visible_height = inner.height as usize;
     // Update cached visible height in app state for event handlers
@@ -506,14 +564,32 @@ fn render_file_list(f: &mut Frame, area: Rect, app_state: &mut AppState) {
     let total_lines = lines.len();
 
     // Calculate scroll to keep cursor visible
-    let scroll = if cursor_line_idx < app_state.scroll_offset {
+    let max_scroll = if total_lines > visible_height {
+        total_lines.saturating_sub(visible_height)
+    } else {
+        0
+    };
+
+    // If cursor was adjusted due to missing item, recalculate scroll from the new position
+    // Otherwise, use existing scroll_offset logic
+    let scroll = if cursor_adjusted {
+        // Cursor was adjusted - calculate scroll to show the new cursor position
+        cursor_line_idx
+            .saturating_sub(visible_height.saturating_sub(1))
+            .min(max_scroll)
+            .max(0)
+    } else if cursor_line_idx < app_state.scroll_offset {
         cursor_line_idx
     } else if cursor_line_idx >= app_state.scroll_offset + visible_height {
         cursor_line_idx.saturating_sub(visible_height.saturating_sub(1))
     } else {
         app_state.scroll_offset
     }
-    .min(total_lines.saturating_sub(visible_height));
+    .min(max_scroll)
+    .max(0); // Ensure scroll is never negative
+
+    // Update scroll_offset in app_state to keep it synchronized
+    app_state.scroll_offset = scroll;
 
     let visible_lines: Vec<Line> = lines
         .into_iter()

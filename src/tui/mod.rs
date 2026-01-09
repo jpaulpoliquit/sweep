@@ -214,6 +214,11 @@ pub fn run(initial_state: Option<AppState>) -> Result<()> {
                         crate::tui::state::PendingAction::Clean => {
                             // If there are selected items, proceed to confirmation
                             if app_state.selected_count() > 0 {
+                                // Snapshot current selection when entering confirm screen
+                                // and cache groups so ordering stays stable across redraws.
+                                // (Without this, HashSet iteration can reorder the file list each frame.)
+                                app_state.confirm_snapshot = app_state.selected_items.clone();
+                                app_state.cache_confirm_groups();
                                 app_state.cursor = 0;
                                 app_state.scroll_offset = 0;
                                 app_state.screen =
