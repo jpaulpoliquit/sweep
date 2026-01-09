@@ -1,10 +1,13 @@
 use crate::output::CategoryResult;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use chrono::{Duration, Utc};
 use std::env;
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
+/// Scan for temporary files older than 1 day
+/// 
+/// Checks %TEMP% and %LOCALAPPDATA%\Temp directories
 pub fn scan(_root: &Path) -> Result<CategoryResult> {
     let mut result = CategoryResult::default();
     let mut paths = Vec::new();
@@ -36,6 +39,7 @@ fn scan_temp_dir(
 ) -> Result<()> {
     for entry in WalkDir::new(temp_path)
         .max_depth(3)
+        .follow_links(false)
         .into_iter()
         .filter_map(|e| e.ok())
     {
@@ -56,7 +60,9 @@ fn scan_temp_dir(
     Ok(())
 }
 
+/// Clean (delete) a temp file by moving it to the Recycle Bin
 pub fn clean(path: &Path) -> Result<()> {
-    trash::delete(path)?;
+    trash::delete(path)
+        .with_context(|| format!("Failed to delete temp file: {}", path.display()))?;
     Ok(())
 }

@@ -3,6 +3,9 @@ use crate::output::ScanResults;
 use anyhow::Result;
 use std::io::{self, Write};
 
+/// Clean all categories based on scan results
+/// 
+/// Handles confirmation prompts, error tracking, and provides progress feedback
 pub fn clean_all(results: &ScanResults, skip_confirm: bool) -> Result<()> {
     let total_items = results.cache.items
         + results.temp.items
@@ -27,40 +30,68 @@ pub fn clean_all(results: &ScanResults, skip_confirm: bool) -> Result<()> {
         }
     }
     
+    let mut cleaned = 0;
+    let mut errors = 0;
+    
     // Clean cache
     if results.cache.items > 0 {
+        println!("Cleaning cache directories...");
         for path in &results.cache.paths {
-            if let Err(e) = categories::cache::clean(path) {
-                eprintln!("Warning: Failed to clean {}: {}", path.display(), e);
+            match categories::cache::clean(path) {
+                Ok(()) => cleaned += 1,
+                Err(e) => {
+                    errors += 1;
+                    eprintln!("Warning: Failed to clean {}: {}", path.display(), e);
+                }
             }
         }
     }
     
     // Clean temp
     if results.temp.items > 0 {
+        println!("Cleaning temp files...");
         for path in &results.temp.paths {
-            if let Err(e) = categories::temp::clean(path) {
-                eprintln!("Warning: Failed to clean {}: {}", path.display(), e);
+            match categories::temp::clean(path) {
+                Ok(()) => cleaned += 1,
+                Err(e) => {
+                    errors += 1;
+                    eprintln!("Warning: Failed to clean {}: {}", path.display(), e);
+                }
             }
         }
     }
     
     // Clean trash
     if results.trash.items > 0 {
-        if let Err(e) = categories::trash::clean() {
-            eprintln!("Warning: Failed to empty Recycle Bin: {}", e);
+        println!("Emptying Recycle Bin...");
+        match categories::trash::clean() {
+            Ok(()) => cleaned += results.trash.items,
+            Err(e) => {
+                errors += 1;
+                eprintln!("Warning: Failed to empty Recycle Bin: {}", e);
+            }
         }
     }
     
     // Clean build artifacts
     if results.build.items > 0 {
+        println!("Cleaning build artifacts...");
         for path in &results.build.paths {
-            if let Err(e) = categories::build::clean(path) {
-                eprintln!("Warning: Failed to clean {}: {}", path.display(), e);
+            match categories::build::clean(path) {
+                Ok(()) => cleaned += 1,
+                Err(e) => {
+                    errors += 1;
+                    eprintln!("Warning: Failed to clean {}: {}", path.display(), e);
+                }
             }
         }
     }
     
-    println!("Cleanup complete.");
+    if errors > 0 {
+        println!("Cleanup complete. {} items cleaned, {} errors encountered.", cleaned, errors);
+    } else {
+        println!("Cleanup complete. {} items cleaned.", cleaned);
+    }
+    
     Ok(())
 }

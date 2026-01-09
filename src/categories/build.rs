@@ -1,6 +1,6 @@
 use crate::output::CategoryResult;
 use crate::project;
-use anyhow::Result;
+use anyhow::{Context, Result};
 use std::path::{Path, PathBuf};
 use walkdir::WalkDir;
 
@@ -80,7 +80,11 @@ fn find_build_artifacts(project_path: &Path) -> Vec<PathBuf> {
 fn calculate_size(path: &Path) -> Result<u64> {
     let mut total = 0u64;
     
-    for entry in WalkDir::new(path).into_iter().filter_map(|e| e.ok()) {
+    for entry in WalkDir::new(path)
+        .follow_links(false)
+        .into_iter()
+        .filter_map(|e| e.ok())
+    {
         if let Ok(metadata) = entry.metadata() {
             if metadata.is_file() {
                 total += metadata.len();
@@ -91,8 +95,9 @@ fn calculate_size(path: &Path) -> Result<u64> {
     Ok(total)
 }
 
-/// Clean (delete) a build artifact directory
+/// Clean (delete) a build artifact directory by moving it to the Recycle Bin
 pub fn clean(path: &Path) -> Result<()> {
-    trash::delete(path)?;
+    trash::delete(path)
+        .with_context(|| format!("Failed to delete build artifact: {}", path.display()))?;
     Ok(())
 }
