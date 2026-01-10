@@ -279,16 +279,95 @@ fn render_status_dashboard(f: &mut Frame, area: Rect, status: &SystemStatus) {
         }
     }
     
-    // Secondary metrics: Network, Power, and System Diagnostics (3 columns) - ALWAYS at index 2
+    // Secondary metrics: Network, Power, GPU (if available), and System Diagnostics - ALWAYS at index 2
     if main_sections.len() > 2 && main_sections[2].height > 0 {
         let secondary_area = main_sections[2];
         
-        // Ensure minimum width per column (at least 25 chars each for 3 columns)
-        let min_col_width = 25u16;
-        let total_min_width = min_col_width * 3 + 2; // 3 columns + 2 spacers
+        let has_gpu = status.gpu.is_some();
+        #[cfg(windows)]
+        let has_boot_info = status.boot_info.is_some();
+        #[cfg(not(windows))]
+        let has_boot_info = false;
         
-        if secondary_area.width >= total_min_width {
-            // Enough space - use 3-column layout
+        // Check if we have temperature sensors to show
+        let has_temp_sensors = !status.temperature_sensors.is_empty();
+        
+        // Determine layout: 5 columns if all available, 4 if GPU+boot+temp, otherwise 3
+        let use_5_cols = has_gpu && has_boot_info && has_temp_sensors;
+        let use_4_cols = (has_gpu && has_boot_info) || (has_gpu && has_temp_sensors) || (has_boot_info && has_temp_sensors);
+        let min_col_width_5 = 18u16; // Smaller width for 5 columns
+        let min_col_width_4 = 20u16;
+        let min_col_width_3 = 25u16;
+        
+        let total_min_width_5 = min_col_width_5 * 5 + 4; // 5 columns + 4 spacers
+        let total_min_width_4 = min_col_width_4 * 4 + 3; // 4 columns + 3 spacers
+        let total_min_width_3 = min_col_width_3 * 3 + 2; // 3 columns + 2 spacers
+        
+        if secondary_area.width >= total_min_width_5 && use_5_cols {
+            // 5-column layout: Network, Power, GPU, Temperature, System Diagnostics
+            let secondary_cols = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Percentage(20), // Network
+                    Constraint::Length(1), // Spacing
+                    Constraint::Percentage(20), // Power
+                    Constraint::Length(1), // Spacing
+                    Constraint::Percentage(20), // GPU
+                    Constraint::Length(1), // Spacing
+                    Constraint::Percentage(20), // Temperature
+                    Constraint::Length(1), // Spacing
+                    Constraint::Percentage(20), // System Diagnostics
+                ])
+                .split(secondary_area);
+            
+            render_network_section(f, secondary_cols[0], status);
+            render_power_section_compact(f, secondary_cols[2], status);
+            if let Some(ref gpu) = status.gpu {
+                render_gpu_section(f, secondary_cols[4], gpu);
+            }
+            if has_temp_sensors {
+                render_temperature_sensors_section(f, secondary_cols[6], &status.temperature_sensors);
+            }
+            #[cfg(windows)]
+            {
+                if let Some(ref boot_info) = status.boot_info {
+                    render_boot_info_section(f, secondary_cols[8], boot_info);
+                }
+            }
+        } else if secondary_area.width >= total_min_width_4 && use_4_cols {
+            // 4-column layout: Network, Power, GPU, and one of Temperature/System Diagnostics
+            let secondary_cols = Layout::default()
+                .direction(Direction::Horizontal)
+                .constraints([
+                    Constraint::Percentage(25), // Network
+                    Constraint::Length(1), // Spacing
+                    Constraint::Percentage(25), // Power
+                    Constraint::Length(1), // Spacing
+                    Constraint::Percentage(25), // GPU
+                    Constraint::Length(1), // Spacing
+                    Constraint::Percentage(25), // Temperature or System Diagnostics
+                ])
+                .split(secondary_area);
+            
+            render_network_section(f, secondary_cols[0], status);
+            render_power_section_compact(f, secondary_cols[2], status);
+            if let Some(ref gpu) = status.gpu {
+                render_gpu_section(f, secondary_cols[4], gpu);
+            }
+            
+            // Show Temperature Sensors if available, otherwise System Diagnostics
+            if has_temp_sensors {
+                render_temperature_sensors_section(f, secondary_cols[6], &status.temperature_sensors);
+            } else {
+                #[cfg(windows)]
+                {
+                    if let Some(ref boot_info) = status.boot_info {
+                        render_boot_info_section(f, secondary_cols[6], boot_info);
+                    }
+                }
+            }
+        } else if secondary_area.width >= total_min_width_3 {
+            // 3-column layout: Network, Power, GPU/System Diagnostics/Temperature
             let secondary_cols = Layout::default()
                 .direction(Direction::Horizontal)
                 .constraints([
@@ -296,41 +375,76 @@ fn render_status_dashboard(f: &mut Frame, area: Rect, status: &SystemStatus) {
                     Constraint::Length(1), // Spacing
                     Constraint::Percentage(33), // Power
                     Constraint::Length(1), // Spacing
-                    Constraint::Percentage(33), // System Diagnostics
+                    Constraint::Percentage(33), // GPU, System Diagnostics, or Temperature
                 ])
                 .split(secondary_area);
             
             render_network_section(f, secondary_cols[0], status);
             render_power_section_compact(f, secondary_cols[2], status);
-            #[cfg(windows)]
-            {
-                if let Some(ref boot_info) = status.boot_info {
-                    render_boot_info_section(f, secondary_cols[4], boot_info);
+            
+            // Priority: GPU > Temperature Sensors > System Diagnostics
+            if let Some(ref gpu) = status.gpu {
+                render_gpu_section(f, secondary_cols[4], gpu);
+            } else if has_temp_sensors {
+                render_temperature_sensors_section(f, secondary_cols[4], &status.temperature_sensors);
+            } else {
+                #[cfg(windows)]
+                {
+                    if let Some(ref boot_info) = status.boot_info {
+                        render_boot_info_section(f, secondary_cols[4], boot_info);
+                    }
                 }
-            }
-            #[cfg(not(windows))]
-            {
-                // Non-Windows: leave empty or show placeholder
+                #[cfg(not(windows))]
+                {
+                    // Non-Windows: leave empty or show placeholder
+                }
             }
         } else {
             // Too narrow - stack vertically
+            // Always show Network and Power, plus GPU, Temperature Sensors, and Boot Info if available
+            let num_sections = 2 + (if has_gpu { 1 } else { 0 }) + (if has_temp_sensors { 1 } else { 0 }) + (if has_boot_info { 1 } else { 0 });
+            let section_height = secondary_area.height / num_sections.max(1) as u16;
+            let mut constraints = Vec::new();
+            
+            for i in 0..num_sections {
+                if i > 0 {
+                    constraints.push(Constraint::Length(1)); // Spacing
+                }
+                constraints.push(Constraint::Length(section_height));
+            }
+            
             let stacked = Layout::default()
                 .direction(Direction::Vertical)
-                .constraints([
-                    Constraint::Length(secondary_area.height / 3),
-                    Constraint::Length(1),
-                    Constraint::Length(secondary_area.height / 3),
-                    Constraint::Length(1),
-                    Constraint::Min(1),
-                ])
+                .constraints(constraints)
                 .split(secondary_area);
             
-            render_network_section(f, stacked[0], status);
-            render_power_section_compact(f, stacked[2], status);
+            let mut idx = 0;
+            render_network_section(f, stacked[idx], status);
+            idx += 2; // Skip spacing
+            
+            render_power_section_compact(f, stacked[idx], status);
+            idx += 2; // Skip spacing
+            
+            if let Some(ref gpu) = status.gpu {
+                if idx < stacked.len() {
+                    render_gpu_section(f, stacked[idx], gpu);
+                    idx += 2; // Skip spacing
+                }
+            }
+            
+            if has_temp_sensors {
+                if idx < stacked.len() {
+                    render_temperature_sensors_section(f, stacked[idx], &status.temperature_sensors);
+                    idx += 2; // Skip spacing
+                }
+            }
+            
             #[cfg(windows)]
             {
                 if let Some(ref boot_info) = status.boot_info {
-                    render_boot_info_section(f, stacked[4], boot_info);
+                    if idx < stacked.len() {
+                        render_boot_info_section(f, stacked[idx], boot_info);
+                    }
                 }
             }
         }
@@ -2010,6 +2124,285 @@ fn format_uptime_detailed(seconds: u64) -> String {
         format!("{} hours, {} minutes", hours, minutes)
     } else {
         format!("{} minutes", minutes)
+    }
+}
+
+fn render_gpu_section(f: &mut Frame, area: Rect, gpu: &crate::status::GpuMetrics) {
+    let gpu_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Styles::border())
+        .title("🎮 GPU");
+
+    let inner = gpu_block.inner(area);
+    f.render_widget(gpu_block, area);
+
+    // Build constraints based on available data
+    let mut constraints = vec![
+        Constraint::Length(1), // Name
+    ];
+
+    // Memory line (dedicated + shared combined)
+    if (gpu.memory_dedicated_used_mb.is_some() || gpu.memory_dedicated_total_mb.is_some()) ||
+       (gpu.memory_shared_used_mb.is_some() || gpu.memory_shared_total_mb.is_some()) {
+        constraints.push(Constraint::Length(1)); // Memory (dedicated + shared)
+    }
+    
+    // Utilization line (overall + engines combined)
+    if gpu.utilization_percent.is_some() || 
+       gpu.render_engine_percent.is_some() || 
+       gpu.copy_engine_percent.is_some() || 
+       gpu.compute_engine_percent.is_some() ||
+       gpu.video_engine_percent.is_some() {
+        constraints.push(Constraint::Length(1)); // Utilization + engines
+    }
+    
+    // Temperature line (temp + threshold)
+    if gpu.temperature_celsius.is_some() || gpu.temperature_threshold_celsius.is_some() {
+        constraints.push(Constraint::Length(1)); // Temperature + threshold
+    }
+    
+    // Optional: Clock speed and Power (if available)
+    if gpu.clock_speed_mhz.is_some() {
+        constraints.push(Constraint::Length(1)); // Clock speed
+    }
+    if gpu.power_usage_watts.is_some() {
+        constraints.push(Constraint::Length(1)); // Power
+    }
+
+    let lines = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(constraints)
+        .split(inner);
+
+    let mut line_idx = 0;
+
+    // GPU Name with driver version (truncate if too long)
+    let name_display = if let Some(ref driver) = gpu.driver_version {
+        let name_with_driver = format!("{} ({})", gpu.name, driver);
+        if name_with_driver.len() > (inner.width as usize).saturating_sub(5) {
+            format!("{}…", &name_with_driver[..(inner.width as usize).saturating_sub(6)])
+        } else {
+            name_with_driver
+        }
+    } else {
+        let name = if gpu.name.len() > (inner.width as usize).saturating_sub(10) {
+            format!("{}…", &gpu.name[..(inner.width as usize).saturating_sub(11)])
+        } else {
+            gpu.name.clone()
+        };
+        format!("{} ({})", name, gpu.vendor)
+    };
+    let name_para = Paragraph::new(name_display)
+        .style(Styles::primary())
+        .alignment(Alignment::Left);
+    f.render_widget(name_para, lines[line_idx]);
+    line_idx += 1;
+
+    // Memory line: Dedicated + Shared combined (like Task Manager)
+    if line_idx < lines.len() {
+        let mut mem_parts = Vec::new();
+        
+        // Dedicated memory
+        if let (Some(used), Some(total)) = (gpu.memory_dedicated_used_mb, gpu.memory_dedicated_total_mb) {
+            let used_gb = used as f64 / 1024.0;
+            let total_gb = total as f64 / 1024.0;
+            let mem_percent = if total > 0 {
+                (used as f32 / total as f32) * 100.0
+            } else {
+                0.0
+            };
+            mem_parts.push(format!("{:.1} / {:.1} GB ({:.1}%)", used_gb, total_gb, mem_percent));
+        }
+        
+        // Shared memory
+        if let (Some(shared_used), Some(shared_total)) = (gpu.memory_shared_used_mb, gpu.memory_shared_total_mb) {
+            let shared_used_gb = shared_used as f64 / 1024.0;
+            let shared_total_gb = shared_total as f64 / 1024.0;
+            let shared_percent = if shared_total > 0 {
+                (shared_used as f32 / shared_total as f32) * 100.0
+            } else {
+                0.0
+            };
+            mem_parts.push(format!("Shared {:.1} / {:.1} GB ({:.1}%)", shared_used_gb, shared_total_gb, shared_percent));
+        }
+        
+        if !mem_parts.is_empty() {
+            let mem_text = format!("Memory   {}", mem_parts.join("  "));
+            let mem_para = Paragraph::new(mem_text).style(Styles::secondary());
+            f.render_widget(mem_para, lines[line_idx]);
+            line_idx += 1;
+        }
+    }
+
+    // Utilization line: Overall + Engines (like Task Manager)
+    if line_idx < lines.len() {
+        let mut util_parts = Vec::new();
+        
+        // Overall utilization
+        if let Some(util) = gpu.utilization_percent {
+            util_parts.push(format!("{:.0}%", util));
+        }
+        
+        // Engine breakdowns
+        if let Some(render) = gpu.render_engine_percent {
+            util_parts.push(format!("3D: {:.0}%", render));
+        }
+        if let Some(copy) = gpu.copy_engine_percent {
+            util_parts.push(format!("Copy: {:.0}%", copy));
+        }
+        if let Some(compute) = gpu.compute_engine_percent {
+            util_parts.push(format!("Compute: {:.0}%", compute));
+        }
+        if let Some(video) = gpu.video_engine_percent {
+            util_parts.push(format!("Video: {:.0}%", video));
+        }
+        
+        if !util_parts.is_empty() {
+            let util_text = format!("Utilization  {}  │  {}", 
+                util_parts[0], 
+                util_parts[1..].join("  "));
+            let util_para = Paragraph::new(util_text).style(Styles::primary());
+            f.render_widget(util_para, lines[line_idx]);
+            line_idx += 1;
+        }
+    }
+
+    // Temperature line: Temp + Threshold (like Task Manager)
+    if line_idx < lines.len() {
+        let mut temp_parts = Vec::new();
+        
+        if let Some(temp) = gpu.temperature_celsius {
+            temp_parts.push(format!("{:.0}°C", temp));
+        }
+        
+        if let Some(threshold) = gpu.temperature_threshold_celsius {
+            temp_parts.push(format!("Threshold: {:.0}°C", threshold));
+        }
+        
+        if !temp_parts.is_empty() {
+            let temp_style = if let Some(temp) = gpu.temperature_celsius {
+                if temp > 85.0 {
+                    Styles::error()
+                } else if temp > 75.0 {
+                    Styles::warning()
+                } else {
+                    Styles::secondary()
+                }
+            } else {
+                Styles::secondary()
+            };
+            
+            let temp_text = if temp_parts.len() > 1 {
+                format!("Temperature  {}  │  {}", temp_parts[0], temp_parts[1])
+            } else {
+                format!("Temperature  {}", temp_parts[0])
+            };
+            let temp_para = Paragraph::new(temp_text).style(temp_style);
+            f.render_widget(temp_para, lines[line_idx]);
+            line_idx += 1;
+        }
+    }
+
+    // Clock Speed
+    if let Some(clock) = gpu.clock_speed_mhz {
+        let clock_ghz = clock as f64 / 1000.0;
+        let clock_text = format!("Clock   {:.1} GHz", clock_ghz);
+        let clock_para = Paragraph::new(clock_text).style(Styles::secondary());
+        if line_idx < lines.len() {
+            f.render_widget(clock_para, lines[line_idx]);
+            line_idx += 1;
+        }
+    }
+
+    // Power Usage
+    if let Some(power) = gpu.power_usage_watts {
+        let power_text = format!("Power   {:.1} W", power);
+        let power_para = Paragraph::new(power_text).style(Styles::secondary());
+        if line_idx < lines.len() {
+            f.render_widget(power_para, lines[line_idx]);
+        }
+    }
+}
+
+fn render_temperature_sensors_section(f: &mut Frame, area: Rect, sensors: &[crate::status::TemperatureSensor]) {
+    if sensors.is_empty() {
+        return;
+    }
+    
+    let temp_block = Block::default()
+        .borders(Borders::ALL)
+        .border_style(Styles::border())
+        .title("🌡️  Temperature");
+
+    let inner = temp_block.inner(area);
+    f.render_widget(temp_block, area);
+    
+    // Show up to 5 sensors (or as many as fit)
+    let sensors_to_show = sensors.len().min(5).min(inner.height as usize);
+    
+    if sensors_to_show == 0 {
+        return;
+    }
+    
+    let lines = Layout::default()
+        .direction(Direction::Vertical)
+        .constraints(
+            (0..sensors_to_show)
+                .map(|_| Constraint::Length(1))
+                .collect::<Vec<_>>()
+        )
+        .split(inner);
+    
+    for (i, sensor) in sensors.iter().take(sensors_to_show).enumerate() {
+        if i < lines.len() {
+            // Truncate label if too long
+            let label = if sensor.label.len() > (inner.width as usize).saturating_sub(15) {
+                format!("{}…", &sensor.label[..(inner.width as usize).saturating_sub(16)])
+            } else {
+                sensor.label.clone()
+            };
+            
+            // Determine style based on temperature
+            let temp_style = if let Some(critical) = sensor.critical_celsius {
+                if sensor.temperature_celsius >= critical {
+                    Styles::error()
+                } else if let Some(max) = sensor.max_celsius {
+                    if sensor.temperature_celsius >= max * 0.9 {
+                        Styles::warning()
+                    } else {
+                        Styles::secondary()
+                    }
+                } else {
+                    Styles::secondary()
+                }
+            } else if sensor.temperature_celsius > 85.0 {
+                Styles::error()
+            } else if sensor.temperature_celsius > 75.0 {
+                Styles::warning()
+            } else {
+                Styles::secondary()
+            };
+            
+            // Format temperature with max/critical indicators
+            let temp_text = if let Some(critical) = sensor.critical_celsius {
+                if sensor.temperature_celsius >= critical {
+                    format!("{:<12} {:.0}°C (CRIT)", label, sensor.temperature_celsius)
+                } else if let Some(max) = sensor.max_celsius {
+                    format!("{:<12} {:.0}°C / {:.0}°C", label, sensor.temperature_celsius, max)
+                } else {
+                    format!("{:<12} {:.0}°C", label, sensor.temperature_celsius)
+                }
+            } else if let Some(max) = sensor.max_celsius {
+                format!("{:<12} {:.0}°C / {:.0}°C", label, sensor.temperature_celsius, max)
+            } else {
+                format!("{:<12} {:.0}°C", label, sensor.temperature_celsius)
+            };
+            
+            let temp_para = Paragraph::new(temp_text)
+                .style(temp_style)
+                .alignment(Alignment::Left);
+            f.render_widget(temp_para, lines[i]);
+        }
     }
 }
 

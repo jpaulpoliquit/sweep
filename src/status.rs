@@ -52,7 +52,7 @@ use windows::{
         Foundation::ERROR_SUCCESS,
         System::Performance::{
             PdhAddCounterW, PdhCloseQuery, PdhCollectQueryData, PdhGetFormattedCounterValue,
-            PdhOpenQueryW, PDH_FMT_COUNTERVALUE, PDH_FMT_DOUBLE,
+            PdhOpenQueryW, PDH_FMT_COUNTERVALUE, PDH_FMT_DOUBLE, PDH_FMT_LARGE,
         },
     },
 };
@@ -371,6 +371,28 @@ pub struct TemperatureSensor {
     pub critical_celsius: Option<f32>,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize)]
+pub struct GpuMetrics {
+    pub name: String,
+    pub vendor: String,
+    pub utilization_percent: Option<f32>,           // Overall GPU utilization %
+    pub render_engine_percent: Option<f32>,        // 3D engine utilization %
+    pub copy_engine_percent: Option<f32>,          // Copy engine utilization %
+    pub compute_engine_percent: Option<f32>,       // Compute engine utilization %
+    pub video_engine_percent: Option<f32>,         // Video decode/encode engine utilization %
+    pub memory_dedicated_used_mb: Option<u64>,      // Dedicated VRAM used
+    pub memory_dedicated_total_mb: Option<u64>,     // Dedicated VRAM total
+    pub memory_shared_used_mb: Option<u64>,         // Shared system RAM used by GPU
+    pub memory_shared_total_mb: Option<u64>,        // Shared system RAM total
+    pub memory_utilization_percent: Option<f32>,    // Memory utilization %
+    pub temperature_celsius: Option<f32>,
+    pub temperature_threshold_celsius: Option<f32>, // Temperature threshold/max
+    pub clock_speed_mhz: Option<u64>,
+    pub power_usage_watts: Option<f32>,
+    pub driver_version: Option<String>,
+    pub pci_bus: Option<u32>,
+}
+
 #[cfg(windows)]
 #[derive(Debug, Clone, Serialize, Deserialize)]
 pub struct DiskBreakdown {
@@ -444,6 +466,9 @@ pub fn gather_status(system: &mut System) -> Result<SystemStatus> {
         // Gather temperature sensors
         let temperature_sensors = gather_temperature_sensors();
 
+        // Gather GPU metrics
+        let gpu = gather_gpu_metrics();
+
         // Gather top processes (show 10 instead of 5)
         #[cfg(windows)]
         let (handle_counts, page_faults) = {
@@ -489,6 +514,7 @@ pub fn gather_status(system: &mut System) -> Result<SystemStatus> {
             network,
             network_interfaces,
             temperature_sensors,
+            gpu,
             processes,
             #[cfg(windows)]
             top_io_processes,
@@ -1006,6 +1032,644 @@ fn gather_temperature_sensors() -> Vec<TemperatureSensor> {
             critical_celsius: component.critical(),
         })
         .collect()
+}
+
+fn gather_gpu_metrics() -> Option<GpuMetrics> {
+    #[cfg(windows)]
+    {
+        // Try NVIDIA first (nvidia-smi)
+        if let Some(nvidia_metrics) = gather_nvidia_gpu_metrics() {
+            return Some(nvidia_metrics);
+        }
+        
+        // Fallback to DXGI for other GPUs
+        gather_dxgi_gpu_metrics()
+    }
+    
+    #[cfg(not(windows))]
+    {
+        // On non-Windows, try to detect NVIDIA via nvidia-smi
+        gather_nvidia_gpu_metrics()
+    }
+}
+
+#[cfg(windows)]
+fn gather_nvidia_gpu_metrics() -> Option<GpuMetrics> {
+    use std::process::Command;
+    
+    // Check if nvidia-smi exists
+    let output = Command::new("nvidia-smi")
+        .args(&[
+            "--query-gpu=name,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu,clocks.current.graphics,power.draw",
+            "--format=csv,noheader,nounits"
+        ])
+        .output()
+        .ok()?;
+    
+    if !output.status.success() {
+        return None;
+    }
+    
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    let line = stdout.lines().next()?;
+    let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+    
+    if parts.len() < 8 {
+        return None;
+    }
+    
+    let name = parts[0].to_string();
+    let utilization_gpu = parts[1].parse::<f32>().ok();
+    let utilization_memory = parts[2].parse::<f32>().ok();
+    let memory_used_mb = parts[3].parse::<u64>().ok();
+    let memory_total_mb = parts[4].parse::<u64>().ok();
+    let temperature = parts[5].parse::<f32>().ok();
+    let clock_speed_mhz = parts[6].parse::<u64>().ok();
+    let power_watts = parts[7].parse::<f32>().ok();
+    
+    Some(GpuMetrics {
+        name,
+        vendor: "NVIDIA".to_string(),
+        utilization_percent: utilization_gpu,
+        render_engine_percent: None, // nvidia-smi doesn't provide engine-level breakdown
+        copy_engine_percent: None,
+        compute_engine_percent: None,
+        video_engine_percent: None,
+        memory_dedicated_used_mb: memory_used_mb,
+        memory_dedicated_total_mb: memory_total_mb,
+        memory_shared_used_mb: None,
+        memory_shared_total_mb: None,
+        memory_utilization_percent: utilization_memory,
+        temperature_celsius: temperature,
+        temperature_threshold_celsius: None, // nvidia-smi doesn't provide threshold
+        clock_speed_mhz,
+        power_usage_watts: power_watts,
+        driver_version: None,
+        pci_bus: None,
+    })
+}
+
+#[cfg(not(windows))]
+fn gather_nvidia_gpu_metrics() -> Option<GpuMetrics> {
+    use std::process::Command;
+    
+    // Check if nvidia-smi exists
+    let output = Command::new("nvidia-smi")
+        .args(&[
+            "--query-gpu=name,utilization.gpu,utilization.memory,memory.used,memory.total,temperature.gpu,clocks.current.graphics,power.draw",
+            "--format=csv,noheader,nounits"
+        ])
+        .output()
+        .ok()?;
+    
+    if !output.status.success() {
+        return None;
+    }
+    
+    let stdout = String::from_utf8(output.stdout).ok()?;
+    let line = stdout.lines().next()?;
+    let parts: Vec<&str> = line.split(',').map(|s| s.trim()).collect();
+    
+    if parts.len() < 8 {
+        return None;
+    }
+    
+    let name = parts[0].to_string();
+    let utilization_gpu = parts[1].parse::<f32>().ok();
+    let utilization_memory = parts[2].parse::<f32>().ok();
+    let memory_used_mb = parts[3].parse::<u64>().ok();
+    let memory_total_mb = parts[4].parse::<u64>().ok();
+    let temperature = parts[5].parse::<f32>().ok();
+    let clock_speed_mhz = parts[6].parse::<u64>().ok();
+    let power_watts = parts[7].parse::<f32>().ok();
+    
+    Some(GpuMetrics {
+        name,
+        vendor: "NVIDIA".to_string(),
+        utilization_percent: utilization_gpu,
+        render_engine_percent: None, // nvidia-smi doesn't provide engine-level breakdown
+        copy_engine_percent: None,
+        compute_engine_percent: None,
+        video_engine_percent: None,
+        memory_dedicated_used_mb: memory_used_mb,
+        memory_dedicated_total_mb: memory_total_mb,
+        memory_shared_used_mb: None,
+        memory_shared_total_mb: None,
+        memory_utilization_percent: utilization_memory,
+        temperature_celsius: temperature,
+        temperature_threshold_celsius: None, // nvidia-smi doesn't provide threshold
+        clock_speed_mhz,
+        power_usage_watts: power_watts,
+        driver_version: None,
+        pci_bus: None,
+    })
+}
+
+#[cfg(windows)]
+fn query_gpu_shared_memory_pdh() -> Option<(u64, u64)> {
+    unsafe {
+        let mut query: isize = 0;
+        if PdhOpenQueryW(None, 0, &mut query) != ERROR_SUCCESS.0 {
+            return None;
+        }
+        
+        // Try to get shared GPU memory from performance counters
+        // Counter: \GPU Process Memory(*)\Shared Usage
+        let mut counter: isize = 0;
+        let counter_path = w!("\\GPU Process Memory(_Total)\\Shared Usage");
+        if PdhAddCounterW(query, counter_path, 0, &mut counter) != ERROR_SUCCESS.0 {
+            let _ = PdhCloseQuery(query);
+            return None;
+        }
+        
+        // Collect data (need two samples for rate counters, but this is an instant counter)
+        let _ = PdhCollectQueryData(query);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let _ = PdhCollectQueryData(query);
+        
+        // Get the value
+        let mut value = PDH_FMT_COUNTERVALUE::default();
+        if PdhGetFormattedCounterValue(counter, PDH_FMT_LARGE, None, &mut value) == ERROR_SUCCESS.0 {
+            let shared_bytes = value.Anonymous.largeValue as u64;
+            let shared_mb = shared_bytes / 1_000_000;
+            
+            // Try to get total shared memory budget
+            let mut total_counter: isize = 0;
+            let total_path = w!("\\GPU Process Memory(_Total)\\Shared Limit");
+            let mut total_value = PDH_FMT_COUNTERVALUE::default();
+            let total_mb = if PdhAddCounterW(query, total_path, 0, &mut total_counter) == ERROR_SUCCESS.0 {
+                let _ = PdhCollectQueryData(query);
+                if PdhGetFormattedCounterValue(total_counter, PDH_FMT_LARGE, None, &mut total_value) == ERROR_SUCCESS.0 {
+                    (total_value.Anonymous.largeValue as u64) / 1_000_000
+                } else {
+                    0
+                }
+            } else {
+                0
+            };
+            
+            let _ = PdhCloseQuery(query);
+            if shared_mb > 0 || total_mb > 0 {
+                return Some((shared_mb, total_mb));
+            }
+        }
+        
+        let _ = PdhCloseQuery(query);
+        None
+    }
+}
+
+#[cfg(windows)]
+fn gather_dxgi_gpu_metrics() -> Option<GpuMetrics> {
+    use windows::{
+        core::*,
+        Win32::Graphics::Dxgi::*,
+    };
+    
+    unsafe {
+    
+        // Create DXGI factory - CreateDXGIFactory1 returns IDXGIFactory1, we need to cast it
+        let factory1: IDXGIFactory1 = match CreateDXGIFactory1() {
+            Ok(f) => f,
+            Err(_) => return None,
+        };
+        
+        // Cast to IDXGIFactory4 for newer features
+        let factory: IDXGIFactory4 = match factory1.cast() {
+            Ok(f) => f,
+            Err(_) => return None,
+        };
+        
+        // Enumerate adapters
+        let mut adapter_index = 0u32;
+        loop {
+            let adapter: IDXGIAdapter = match factory.EnumAdapters(adapter_index) {
+                Ok(a) => a,
+                Err(_) => break None,
+            };
+            
+            // Cast to IDXGIAdapter1 to use GetDesc1()
+            let adapter1: IDXGIAdapter1 = match adapter.cast() {
+                Ok(a) => a,
+                Err(_) => {
+                    adapter_index += 1;
+                    continue;
+                }
+            };
+            
+            let desc = match adapter1.GetDesc1() {
+                Ok(d) => d,
+                Err(_) => {
+                    adapter_index += 1;
+                    continue;
+                }
+            };
+            
+            // Skip software adapters (Microsoft Basic Render Driver)
+            let description = String::from_utf16_lossy(&desc.Description);
+            if description.contains("Microsoft Basic Render Driver") || 
+               description.contains("Software Adapter") {
+                adapter_index += 1;
+                continue;
+            }
+            
+            // Try to get memory info from IDXGIAdapter3
+            let adapter3_result: Result<IDXGIAdapter3> = adapter1.cast();
+            let (dedicated_used_mb, dedicated_total_mb, shared_used_mb, shared_total_mb) = if let Ok(adapter3) = adapter3_result {
+                // Query dedicated (local) memory
+                let mut local_mem_info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
+                let dedicated = match adapter3.QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_LOCAL, &mut local_mem_info) {
+                    Ok(_) => {
+                        let budget_mb = (local_mem_info.Budget / 1_000_000) as u64;
+                        // Use CurrentUsage directly - it's the actual current usage
+                        let current_usage_mb = (local_mem_info.CurrentUsage / 1_000_000) as u64;
+                        (Some(current_usage_mb), Some(budget_mb))
+                    }
+                    Err(_) => (None, None)
+                };
+                
+                // Query shared (non-local) memory
+                // Note: DXGI CurrentUsage for NON_LOCAL might be per-process, not global
+                // Task Manager aggregates across all processes, so we'll use performance counters as fallback
+                let mut shared_mem_info = DXGI_QUERY_VIDEO_MEMORY_INFO::default();
+                let shared_dxgi = match adapter3.QueryVideoMemoryInfo(0, DXGI_MEMORY_SEGMENT_GROUP_NON_LOCAL, &mut shared_mem_info) {
+                    Ok(_) => {
+                        let budget_mb = (shared_mem_info.Budget / 1_000_000) as u64;
+                        // CurrentUsage might be 0 if no process is using shared memory in this context
+                        // We'll try to get it from performance counters as well
+                        let current_usage_mb = (shared_mem_info.CurrentUsage / 1_000_000) as u64;
+                        (Some(current_usage_mb), Some(budget_mb))
+                    }
+                    Err(_) => (None, None)
+                };
+                
+                // Try to get shared memory from performance counters (more accurate for global usage)
+                let shared = if let Some((used, total)) = query_gpu_shared_memory_pdh() {
+                    // Prefer PDH values if available, as they show global shared memory usage
+                    (Some(used), Some(total))
+                } else {
+                    // Fallback to DXGI values
+                    shared_dxgi
+                };
+                
+                (dedicated.0, dedicated.1, shared.0, shared.1)
+            } else {
+                (None, None, None, None)
+            };
+            
+            // Determine vendor from description
+            let vendor = if description.to_lowercase().contains("nvidia") {
+                "NVIDIA"
+            } else if description.to_lowercase().contains("amd") || 
+                      description.to_lowercase().contains("radeon") {
+                "AMD"
+            } else if description.to_lowercase().contains("intel") {
+                "Intel"
+            } else {
+                "Unknown"
+            };
+            
+            // Query GPU utilization and engine metrics via WMI/PDH
+            let (utilization, render_engine, copy_engine, compute_engine, video_engine) = query_gpu_engine_utilization();
+            
+            // Get driver version and PCI bus info from WMI
+            let (driver_version, pci_bus_wmi) = query_gpu_info_wmi(&description);
+            
+            // Try to get temperature and threshold from WMI
+            let (temperature, threshold) = gather_gpu_temperature_wmi(&description);
+            
+            return Some(GpuMetrics {
+                name: description,
+                vendor: vendor.to_string(),
+                utilization_percent: utilization,
+                render_engine_percent: render_engine,
+                copy_engine_percent: copy_engine,
+                compute_engine_percent: compute_engine,
+                video_engine_percent: video_engine,
+                memory_dedicated_used_mb: dedicated_used_mb,
+                memory_dedicated_total_mb: dedicated_total_mb,
+                memory_shared_used_mb: shared_used_mb,
+                memory_shared_total_mb: shared_total_mb,
+                memory_utilization_percent: if let (Some(used), Some(total)) = (dedicated_used_mb, dedicated_total_mb) {
+                    if total > 0 {
+                        Some((used as f32 / total as f32) * 100.0)
+                    } else {
+                        None
+                    }
+                } else {
+                    None
+                },
+                temperature_celsius: temperature,
+                temperature_threshold_celsius: threshold,
+                clock_speed_mhz: None, // DXGI doesn't provide clock speed
+                power_usage_watts: None, // DXGI doesn't provide power usage
+                driver_version,
+                pci_bus: pci_bus_wmi,
+            });
+        }
+    }
+}
+
+#[cfg(windows)]
+fn query_gpu_engine_utilization() -> (Option<f32>, Option<f32>, Option<f32>, Option<f32>, Option<f32>) {
+    use std::collections::HashMap;
+    use std::convert::TryFrom;
+    use wmi::{COMLibrary, WMIConnection, Variant};
+    
+    let com_lib = match COMLibrary::new() {
+        Ok(lib) => lib,
+        Err(_) => return (None, None, None, None, None),
+    };
+    
+    let wmi_con = match WMIConnection::new(com_lib) {
+        Ok(con) => con,
+        Err(_) => return (None, None, None, None, None),
+    };
+    
+    // Query GPU engine utilization from WMI Performance Counters
+    // Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine provides engine-level metrics
+    // The Name field contains: "pid_<pid>_luid_<luid>_engtype_<type>_instance_<instance>"
+    let query = "SELECT Name, UtilizationPercentage FROM Win32_PerfFormattedData_GPUPerformanceCounters_GPUEngine";
+    
+    let results: Vec<HashMap<String, Variant>> = match wmi_con.raw_query::<HashMap<String, Variant>>(query) {
+        Ok(r) => r,
+        Err(_) => return (None, None, None, None, None),
+    };
+    
+    if results.is_empty() {
+        return (None, None, None, None, None);
+    }
+    
+    let mut render_util_sum = 0.0f32;
+    let mut render_count = 0u32;
+    let mut copy_util_sum = 0.0f32;
+    let mut copy_count = 0u32;
+    let mut compute_util_sum = 0.0f32;
+    let mut compute_count = 0u32;
+    let mut video_util_sum = 0.0f32;
+    let mut video_count = 0u32;
+    let mut overall_util_sum = 0.0f32;
+    let mut overall_count = 0u32;
+    
+    for row in results {
+        let name = row.get("Name")
+            .and_then(|v| String::try_from(v.clone()).ok())
+            .unwrap_or_default();
+        
+        let util = row.get("UtilizationPercentage")
+            .and_then(|v| {
+                // Try u32 first, then u64, then f64
+                if let Ok(val) = u32::try_from(v.clone()) {
+                    Some(val as f32)
+                } else if let Ok(val) = u64::try_from(v.clone()) {
+                    Some(val as f32)
+                } else if let Ok(val) = f64::try_from(v.clone()) {
+                    Some(val as f32)
+                } else {
+                    None
+                }
+            });
+        
+        if let Some(util_val) = util {
+            overall_util_sum += util_val;
+            overall_count += 1;
+            
+            // Parse engine type from name (format: "pid_*_luid_*_engtype_*_instance_*")
+            let name_lower = name.to_lowercase();
+            if name_lower.contains("engtype_3d") || name_lower.contains("engtype_render") {
+                render_util_sum += util_val;
+                render_count += 1;
+            } else if name_lower.contains("engtype_copy") {
+                copy_util_sum += util_val;
+                copy_count += 1;
+            } else if name_lower.contains("engtype_compute") {
+                compute_util_sum += util_val;
+                compute_count += 1;
+            } else if name_lower.contains("engtype_video") || name_lower.contains("engtype_decode") || name_lower.contains("engtype_encode") {
+                video_util_sum += util_val;
+                video_count += 1;
+            }
+        }
+    }
+    
+    // Calculate averages for each engine type
+    let overall_util = if overall_count > 0 {
+        Some(overall_util_sum / overall_count as f32)
+    } else {
+        None
+    };
+    
+    let render_util = if render_count > 0 {
+        Some(render_util_sum / render_count as f32)
+    } else {
+        None
+    };
+    
+    let copy_util = if copy_count > 0 {
+        Some(copy_util_sum / copy_count as f32)
+    } else {
+        None
+    };
+    
+    let compute_util = if compute_count > 0 {
+        Some(compute_util_sum / compute_count as f32)
+    } else {
+        None
+    };
+    
+    let video_util = if video_count > 0 {
+        Some(video_util_sum / video_count as f32)
+    } else {
+        None
+    };
+    
+    (overall_util, render_util, copy_util, compute_util, video_util)
+}
+
+#[cfg(windows)]
+fn query_gpu_utilization_pdh() -> Option<(Option<f32>, Option<f32>, Option<f32>, Option<f32>, Option<f32>)> {
+    unsafe {
+        let mut query: isize = 0;
+        if PdhOpenQueryW(None, 0, &mut query) != ERROR_SUCCESS.0 {
+            return None;
+        }
+        
+        // Query overall GPU utilization
+        let mut overall_counter: isize = 0;
+        let overall_path = w!("\\GPU Engine(*)\\Utilization Percentage");
+        if PdhAddCounterW(query, overall_path, 0, &mut overall_counter) != ERROR_SUCCESS.0 {
+            let _ = PdhCloseQuery(query);
+            return None;
+        }
+        
+        // Collect data
+        let _ = PdhCollectQueryData(query);
+        std::thread::sleep(std::time::Duration::from_millis(100));
+        let _ = PdhCollectQueryData(query);
+        
+        // Try to get utilization for each engine type
+        // Note: PDH counter paths for GPU engines are complex, so we'll use WMI for engine breakdown
+        // and PDH for overall if available
+        
+        let mut overall_value = PDH_FMT_COUNTERVALUE::default();
+        if PdhGetFormattedCounterValue(overall_counter, PDH_FMT_DOUBLE, None, &mut overall_value) == ERROR_SUCCESS.0 {
+            let overall_util = overall_value.Anonymous.doubleValue as f32;
+            let _ = PdhCloseQuery(query);
+            
+            // PDH gives us overall, but not engine breakdown
+            // Return overall and None for engines (WMI fallback will handle engines)
+            return Some((Some(overall_util), None, None, None, None));
+        }
+        
+        let _ = PdhCloseQuery(query);
+        None
+    }
+}
+
+#[cfg(windows)]
+fn query_gpu_info_wmi(gpu_name: &str) -> (Option<String>, Option<u32>) {
+    use std::collections::HashMap;
+    use std::convert::TryFrom;
+    use wmi::{COMLibrary, WMIConnection, Variant};
+    
+    let com_lib = match COMLibrary::new() {
+        Ok(lib) => lib,
+        Err(_) => return (None, None),
+    };
+    
+    let wmi_con = match WMIConnection::new(com_lib) {
+        Ok(con) => con,
+        Err(_) => return (None, None),
+    };
+    
+    // Query GPU driver version and PCI bus info
+    let query = format!(
+        "SELECT DriverVersion, PNPDeviceID FROM Win32_VideoController WHERE Name LIKE '%{}%'",
+        gpu_name.chars().take(20).collect::<String>()
+    );
+    
+    let results: Vec<HashMap<String, Variant>> = match wmi_con.raw_query::<HashMap<String, Variant>>(&query) {
+        Ok(r) => r,
+        Err(_) => return (None, None),
+    };
+    
+    for row in results {
+        let driver_version = row.get("DriverVersion")
+            .and_then(|v| String::try_from(v.clone()).ok());
+        
+        // Extract PCI bus from PNPDeviceID (format: PCI\\VEN_XXXX&DEV_XXXX&SUBSYS_XXXX&REV_XX\\X&XXXXXXXX&0&XXXX)
+        // For now, return None as PCI bus extraction requires parsing the device instance path
+        // which is complex and varies by system
+        return (driver_version, None);
+    }
+    
+    (None, None)
+}
+
+#[cfg(windows)]
+fn gather_gpu_temperature_wmi(_gpu_name: &str) -> (Option<f32>, Option<f32>) {
+    use std::collections::HashMap;
+    use std::convert::TryFrom;
+    use wmi::{COMLibrary, WMIConnection, Variant};
+    
+    let com_lib = match COMLibrary::new() {
+        Ok(lib) => lib,
+        Err(_) => return (None, None),
+    };
+    
+    let wmi_con = match WMIConnection::new(com_lib) {
+        Ok(con) => con,
+        Err(_) => return (None, None),
+    };
+    
+    // Query GPU temperature from WMI
+    // Try MSAcpi_ThermalZoneTemperature first (ACPI thermal zones)
+    // This provides both current temperature and threshold
+    let query = "SELECT CurrentTemperature, CriticalTripPoint FROM MSAcpi_ThermalZoneTemperature WHERE InstanceName LIKE '%GPU%' OR InstanceName LIKE '%Graphics%'";
+    
+    let results: Vec<HashMap<String, Variant>> = match wmi_con.raw_query::<HashMap<String, Variant>>(query) {
+        Ok(r) => r,
+        Err(_) => return (None, None),
+    };
+    
+    for row in results {
+        let mut temp_celsius = None;
+        let mut threshold_celsius = None;
+        
+        if let Some(temp_var) = row.get("CurrentTemperature") {
+            if let Ok(temp_value) = u32::try_from(temp_var.clone()) {
+                // WMI returns temperature in tenths of Kelvin, convert to Celsius
+                let temp_kelvin = temp_value as f32 / 10.0;
+                let temp = temp_kelvin - 273.15;
+                // Sanity check: GPU temps should be between 0-120°C
+                if temp >= 0.0 && temp <= 120.0 {
+                    temp_celsius = Some(temp);
+                }
+            }
+        }
+        
+        if let Some(threshold_var) = row.get("CriticalTripPoint") {
+            if let Ok(threshold_value) = u32::try_from(threshold_var.clone()) {
+                // WMI returns threshold in tenths of Kelvin, convert to Celsius
+                let threshold_kelvin = threshold_value as f32 / 10.0;
+                let threshold = threshold_kelvin - 273.15;
+                if threshold >= 0.0 && threshold <= 120.0 {
+                    threshold_celsius = Some(threshold);
+                }
+            }
+        }
+        
+        if temp_celsius.is_some() || threshold_celsius.is_some() {
+            return (temp_celsius, threshold_celsius);
+        }
+    }
+    
+    // Fallback: Try Win32_TemperatureProbe (less common)
+    let query2 = "SELECT CurrentReading, UpperThresholdCritical FROM Win32_TemperatureProbe WHERE Description LIKE '%GPU%' OR Description LIKE '%Graphics%'";
+    if let Ok(results2) = wmi_con.raw_query::<HashMap<String, Variant>>(query2) {
+        for row in results2 {
+            let mut temp_celsius = None;
+            let mut threshold_celsius = None;
+            
+            if let Some(temp_var) = row.get("CurrentReading") {
+                if let Ok(temp_value) = i32::try_from(temp_var.clone()) {
+                    let temp = temp_value as f32 / 10.0;
+                    if temp >= 0.0 && temp <= 120.0 {
+                        temp_celsius = Some(temp);
+                    }
+                }
+            }
+            
+            if let Some(threshold_var) = row.get("UpperThresholdCritical") {
+                if let Ok(threshold_value) = i32::try_from(threshold_var.clone()) {
+                    let threshold = threshold_value as f32 / 10.0;
+                    if threshold >= 0.0 && threshold <= 120.0 {
+                        threshold_celsius = Some(threshold);
+                    }
+                }
+            }
+            
+            if temp_celsius.is_some() || threshold_celsius.is_some() {
+                return (temp_celsius, threshold_celsius);
+            }
+        }
+    }
+    
+    // Final fallback: Try sysinfo Components for temperature (no threshold)
+    use sysinfo::Components;
+    let components = Components::new_with_refreshed_list();
+    for component in components.list() {
+        let label_lower = component.label().to_lowercase();
+        if label_lower.contains("gpu") || label_lower.contains("graphics") {
+            let temp = component.temperature();
+            if temp > 0.0 && temp <= 120.0 {
+                let threshold = component.critical().or_else(|| Some(component.max()));
+                return (Some(temp), threshold);
+            }
+        }
+    }
+    
+    (None, None)
 }
 
 #[cfg(windows)]
