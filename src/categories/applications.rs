@@ -190,7 +190,7 @@ pub fn scan(_root: &Path, config: &Config, output_mode: OutputMode) -> Result<Ca
         let paths: Vec<PathBuf> = apps_with_sizes.iter().map(|(p, _)| p.clone()).collect();
         let size_bytes: u64 = apps_with_sizes.iter().map(|(_, size)| *size).sum();
         let items = apps_with_sizes.len();
-        
+
         let mut result = CategoryResult {
             paths,
             size_bytes,
@@ -229,7 +229,7 @@ pub fn scan(_root: &Path, config: &Config, output_mode: OutputMode) -> Result<Ca
                 }
             }
         }
-        
+
         Ok(result)
     }
 
@@ -308,7 +308,7 @@ pub fn scan_with_progress(_root: &Path, tx: &Sender<ScanProgressEvent>) -> Resul
             items: result.items,
             size_bytes: result.size_bytes,
         });
-        
+
         Ok(result)
     }
 
@@ -325,7 +325,7 @@ pub fn scan_with_progress(_root: &Path, tx: &Sender<ScanProgressEvent>) -> Resul
             items: 0,
             size_bytes: 0,
         });
-        
+
         Ok(CategoryResult::default())
     }
 }
