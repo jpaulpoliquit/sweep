@@ -377,46 +377,81 @@ try {
 
                 # Silent install; will trigger UAC if needed
                 Write-Host "Installing VC++ Runtime (may prompt for admin approval)..." -ForegroundColor Gray
+                Write-Host "  Please wait - this may take a minute..." -ForegroundColor Gray
+                
                 $proc = Start-Process -FilePath $vcRedistPath -ArgumentList "/install", "/quiet", "/norestart" -Wait -PassThru
                 $vcExit = $proc.ExitCode
 
                 if ($vcExit -eq 0 -or $vcExit -eq 3010) {
-                    Write-Host "✓ VC++ Runtime installed." -ForegroundColor Green
+                    Write-Host "✓ VC++ Runtime installer completed." -ForegroundColor Green
+                    
                     if ($vcExit -eq 3010) {
-                        Write-Host "⚠ A restart may be required to complete installation." -ForegroundColor Yellow
-                    }
-
-                    # Wait a moment for DLLs to be registered
-                    Start-Sleep -Seconds 2
-
-                    # Re-test wole
-                    $woleOutput = ""
-                    $woleError = ""
-                    $woleWorks = $false
-                    try {
-                        $processInfo = New-Object System.Diagnostics.ProcessStartInfo
-                        $processInfo.FileName = $TARGET_PATH
-                        $processInfo.Arguments = "--version"
-                        $processInfo.RedirectStandardOutput = $true
-                        $processInfo.RedirectStandardError = $true
-                        $processInfo.UseShellExecute = $false
-                        $processInfo.CreateNoWindow = $true
-
-                        $process = New-Object System.Diagnostics.Process
-                        $process.StartInfo = $processInfo
-                        $processStarted = $process.Start()
+                        Write-Host "⚠ A restart is required to complete installation." -ForegroundColor Yellow
+                        Write-Host "  Please restart your computer, then run 'wole --help' to verify." -ForegroundColor Yellow
+                        # Skip testing wole if restart is required
+                        $woleWorks = $false
+                    } else {
+                        # Wait for installer processes to fully complete
+                        Write-Host "  Waiting for installation to finalize..." -ForegroundColor Gray
+                        Start-Sleep -Seconds 5
                         
-                        if ($processStarted) {
-                            $woleOutput = $process.StandardOutput.ReadToEnd()
-                            $woleError = $process.StandardError.ReadToEnd()
-                            $process.WaitForExit(10000) | Out-Null
-
-                            if ($process.ExitCode -eq 0 -and $woleOutput) {
-                                $woleWorks = $true
+                        # Check if any VC++ installer processes are still running
+                        $maxWait = 30
+                        $waited = 0
+                        while ($waited -lt $maxWait) {
+                            $vcProcesses = Get-Process -Name "vc_redist*", "vcredist*" -ErrorAction SilentlyContinue
+                            if (-not $vcProcesses) {
+                                break
                             }
+                            Start-Sleep -Seconds 2
+                            $waited += 2
                         }
-                    } catch {
-                        $woleError = $_.Exception.Message
+                        
+                        if ($waited -ge $maxWait) {
+                            Write-Host "⚠ VC++ installer may still be running in background." -ForegroundColor Yellow
+                            Write-Host "  Waiting a bit longer before testing wole..." -ForegroundColor Gray
+                            Start-Sleep -Seconds 5
+                        }
+
+                        # Re-test wole with timeout
+                        $woleOutput = ""
+                        $woleError = ""
+                        $woleWorks = $false
+                        try {
+                            $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+                            $processInfo.FileName = $TARGET_PATH
+                            $processInfo.Arguments = "--version"
+                            $processInfo.RedirectStandardOutput = $true
+                            $processInfo.RedirectStandardError = $true
+                            $processInfo.UseShellExecute = $false
+                            $processInfo.CreateNoWindow = $true
+
+                            $process = New-Object System.Diagnostics.Process
+                            $process.StartInfo = $processInfo
+                            $processStarted = $process.Start()
+                            
+                            if ($processStarted) {
+                                # Use a reasonable timeout
+                                if ($process.WaitForExit(5000)) {
+                                    $woleOutput = $process.StandardOutput.ReadToEnd()
+                                    $woleError = $process.StandardError.ReadToEnd()
+
+                                    if ($process.ExitCode -eq 0 -and $woleOutput) {
+                                        $woleWorks = $true
+                                    }
+                                } else {
+                                    # Process didn't exit in time - might be hanging
+                                    try {
+                                        $process.Kill()
+                                    } catch {
+                                        # Ignore kill errors
+                                    }
+                                    $woleError = "wole --version timed out (may indicate system issue)"
+                                }
+                            }
+                        } catch {
+                            $woleError = $_.Exception.Message
+                        }
                     }
                 } else {
                     Write-Host "⚠ VC++ Runtime installer exited with code $vcExit." -ForegroundColor Yellow
@@ -444,6 +479,13 @@ try {
             Write-Host "  wole status   - Show system status" -ForegroundColor White
             Write-Host ""
             Write-Host "Run 'wole --help' for all commands." -ForegroundColor Gray
+            
+            # Warning if VC++ was just installed
+            if ($missingVCRuntime) {
+                Write-Host ""
+                Write-Host "⚠ Note: VC++ Runtime was just installed. If your system feels slow or frozen," -ForegroundColor Yellow
+                Write-Host "  wait a few minutes for background processes to complete, or restart your computer." -ForegroundColor Yellow
+            }
         } else {
             Write-Host "⚠ wole installed but may have issues running" -ForegroundColor Yellow
             if ($woleError) {
@@ -457,6 +499,15 @@ try {
             Write-Host "  - Missing Visual C++ Runtime (install from: https://aka.ms/vs/17/release/vc_redist.${vcArchKey}.exe)" -ForegroundColor Gray
             Write-Host "  - Windows Defender blocking (check Security settings)" -ForegroundColor Gray
             Write-Host "  - Wrong architecture (ARM vs x64)" -ForegroundColor Gray
+            Write-Host "  - System still processing VC++ installation (wait a few minutes or restart)" -ForegroundColor Gray
+            
+            if ($missingVCRuntime) {
+                Write-Host ""
+                Write-Host "⚠ If your system froze or feels unresponsive after VC++ installation:" -ForegroundColor Yellow
+                Write-Host "  1. Wait 2-3 minutes for background processes to complete" -ForegroundColor White
+                Write-Host "  2. If still frozen, restart your computer" -ForegroundColor White
+                Write-Host "  3. After restart, run 'wole --help' to verify installation" -ForegroundColor White
+            }
         }
     } else {
         Write-Host "✗ Installation failed - executable not found at $TARGET_PATH" -ForegroundColor Red
