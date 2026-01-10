@@ -23,11 +23,11 @@ pub fn render(f: &mut Frame, app_state: &AppState) {
     let shortcuts_height = if is_small { 2 } else { 3 };
 
     let header_height = LOGO_WITH_TAGLINE_HEIGHT;
-    
+
     // Ensure we have minimum space: header + content (7 lines) + shortcuts
     let min_content_height = 7;
     let min_total_height = header_height + min_content_height + shortcuts_height;
-    
+
     // If viewport is too small, show a message instead
     if area.height < min_total_height || area.width < 20 {
         let msg = Paragraph::new("Terminal too small. Please resize to at least 20x25")
@@ -72,7 +72,7 @@ fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bo
         let title_height = 1;
         let spacing_height = 1;
         let content_height = area.height.saturating_sub(title_height + spacing_height);
-        
+
         // Ensure we have at least some space for content
         // List widget needs: 2 borders + 2 padding + at least 2 lines for one item = 6 lines minimum
         // But we'll be more generous and require 7 lines to avoid any rendering artifacts
@@ -87,12 +87,12 @@ fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bo
 
         // Use the calculated content height (already validated to be >= 7)
         let safe_content_height = content_height;
-        
+
         let chunks = Layout::default()
             .direction(Direction::Vertical)
             .constraints([
-                Constraint::Length(title_height), // Title
-                Constraint::Length(spacing_height), // Spacing
+                Constraint::Length(title_height),        // Title
+                Constraint::Length(spacing_height),      // Spacing
                 Constraint::Length(safe_content_height), // Content - use exact height to prevent overflow
             ])
             .split(area);
@@ -132,18 +132,47 @@ fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bo
     }
 }
 
-fn render_options(f: &mut Frame, area: Rect, cursor: &usize, selected: &std::collections::HashSet<usize>) {
+fn render_options(
+    f: &mut Frame,
+    area: Rect,
+    cursor: &usize,
+    selected: &std::collections::HashSet<usize>,
+) {
     let options = [
         ("DNS Cache", "Flush DNS cache (ipconfig /flushdns)", false),
         ("Thumbnails", "Clear thumbnail cache", false),
         ("Icons", "Rebuild icon cache and restart Explorer", false),
         ("Databases", "Optimize browser databases (VACUUM)", false),
-        ("Fonts", "Restart Font Cache Service - fixes font display issues (requires admin)", true),
-        ("Memory", "Clear standby memory - frees up RAM (requires admin)", true),
-        ("Network", "Reset network stack - fixes connection issues (requires admin)", true),
-        ("Bluetooth", "Restart Bluetooth service - fixes Bluetooth problems (requires admin)", true),
-        ("Search", "Restart Windows Search - rebuilds search index (requires admin)", true),
-        ("Explorer", "Restart Windows Explorer - refreshes desktop and file manager", false),
+        (
+            "Fonts",
+            "Restart Font Cache Service - fixes font display issues (requires admin)",
+            true,
+        ),
+        (
+            "Memory",
+            "Clear standby memory - frees up RAM (requires admin)",
+            true,
+        ),
+        (
+            "Network",
+            "Reset network stack - fixes connection issues (requires admin)",
+            true,
+        ),
+        (
+            "Bluetooth",
+            "Restart Bluetooth service - fixes Bluetooth problems (requires admin)",
+            true,
+        ),
+        (
+            "Search",
+            "Restart Windows Search - rebuilds search index (requires admin)",
+            true,
+        ),
+        (
+            "Explorer",
+            "Restart Windows Explorer - refreshes desktop and file manager",
+            false,
+        ),
     ];
 
     // Ensure area is valid (at least 7x20 for borders, padding, and at least one item)
@@ -155,7 +184,7 @@ fn render_options(f: &mut Frame, area: Rect, cursor: &usize, selected: &std::col
         f.render_widget(msg, area);
         return;
     }
-    
+
     // Ensure area doesn't exceed terminal bounds (safety check)
     let terminal_area = f.area();
     let safe_area = Rect {
@@ -164,7 +193,7 @@ fn render_options(f: &mut Frame, area: Rect, cursor: &usize, selected: &std::col
         width: area.width.min(terminal_area.width.saturating_sub(area.x)),
         height: area.height.min(terminal_area.height.saturating_sub(area.y)),
     };
-    
+
     // Double-check the safe area is still valid
     if safe_area.width < 20 || safe_area.height < 7 {
         let msg = Paragraph::new("Window too small")
@@ -177,7 +206,7 @@ fn render_options(f: &mut Frame, area: Rect, cursor: &usize, selected: &std::col
     // Calculate max description length based on available width
     // Account for: prefix (2) + checkbox (3) + space (1) + name + admin_note + indent (3) = ~15-20 chars
     let max_desc_width = safe_area.width.saturating_sub(20).max(20) as usize;
-    
+
     // Create items, but limit rendering to what fits
     let items: Vec<ListItem> = options
         .iter()
@@ -199,12 +228,8 @@ fn render_options(f: &mut Frame, area: Rect, cursor: &usize, selected: &std::col
                 Styles::secondary()
             };
 
-            let admin_note = if *needs_admin {
-                " (admin)"
-            } else {
-                ""
-            };
-            
+            let admin_note = if *needs_admin { " (admin)" } else { "" };
+
             // Truncate description if too long to prevent wrapping/overflow
             let desc_text = if desc.len() > max_desc_width {
                 format!("{}...", &desc[..max_desc_width.saturating_sub(3)])
@@ -225,21 +250,26 @@ fn render_options(f: &mut Frame, area: Rect, cursor: &usize, selected: &std::col
         })
         .collect();
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Styles::border())
-                .title("Optimizations")
-                .padding(ratatui::widgets::Padding::uniform(1)),
-        );
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Styles::border())
+            .title("Optimizations")
+            .padding(ratatui::widgets::Padding::uniform(1)),
+    );
 
     let mut list_state = ratatui::widgets::ListState::default();
     list_state.select(Some(*cursor));
     f.render_stateful_widget(list, safe_area, &mut list_state);
 }
 
-fn render_results_with_message(f: &mut Frame, area: Rect, results: &[OptimizeResult], cursor: &usize, message: &Option<String>) {
+fn render_results_with_message(
+    f: &mut Frame,
+    area: Rect,
+    results: &[OptimizeResult],
+    cursor: &usize,
+    message: &Option<String>,
+) {
     // If there's a message, split the area to show it
     if let Some(msg) = message {
         let chunks = Layout::default()
@@ -249,9 +279,9 @@ fn render_results_with_message(f: &mut Frame, area: Rect, results: &[OptimizeRes
                 Constraint::Length(3), // Message area (border + padding + text)
             ])
             .split(area);
-        
+
         render_results(f, chunks[0], results, cursor);
-        
+
         // Render message box
         let message_widget = Paragraph::new(msg.as_str())
             .style(Styles::warning())
@@ -259,7 +289,7 @@ fn render_results_with_message(f: &mut Frame, area: Rect, results: &[OptimizeRes
                 Block::default()
                     .borders(Borders::ALL)
                     .border_style(Styles::border())
-                    .title("Note")
+                    .title("Note"),
             )
             .alignment(ratatui::layout::Alignment::Left);
         f.render_widget(message_widget, chunks[1]);
@@ -277,7 +307,7 @@ fn render_results(f: &mut Frame, area: Rect, results: &[OptimizeResult], cursor:
         f.render_widget(msg, area);
         return;
     }
-    
+
     // Ensure area doesn't exceed terminal bounds (safety check)
     let terminal_area = f.area();
     let safe_area = Rect {
@@ -286,7 +316,7 @@ fn render_results(f: &mut Frame, area: Rect, results: &[OptimizeResult], cursor:
         width: area.width.min(terminal_area.width.saturating_sub(area.x)),
         height: area.height.min(terminal_area.height.saturating_sub(area.y)),
     };
-    
+
     // Double-check the safe area is still valid
     if safe_area.width < 20 || safe_area.height < 7 {
         let msg = Paragraph::new("Window too small")
@@ -301,7 +331,7 @@ fn render_results(f: &mut Frame, area: Rect, results: &[OptimizeResult], cursor:
         .enumerate()
         .map(|(i, result)| {
             let is_selected = i == *cursor;
-            
+
             let icon = if result.success {
                 if result.message.starts_with("Skipped:") {
                     "○"
@@ -352,14 +382,13 @@ fn render_results(f: &mut Frame, area: Rect, results: &[OptimizeResult], cursor:
         })
         .collect();
 
-    let list = List::new(items)
-        .block(
-            Block::default()
-                .borders(Borders::ALL)
-                .border_style(Styles::border())
-                .title("Results")
-                .padding(ratatui::widgets::Padding::uniform(1)),
-        );
+    let list = List::new(items).block(
+        Block::default()
+            .borders(Borders::ALL)
+            .border_style(Styles::border())
+            .title("Results")
+            .padding(ratatui::widgets::Padding::uniform(1)),
+    );
 
     // Use stateful widget to support cursor navigation
     let mut list_state = ratatui::widgets::ListState::default();

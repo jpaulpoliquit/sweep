@@ -1,19 +1,6 @@
-<div align="center">
-  <h1>Wole</h1>
-  <p><em>Deep clean and optimize your Windows PC.</em></p>
-</div>
+# Wole
 
-<p align="center">
-  <a href="https://github.com/jpaulpoliquit/wole/stargazers"><img src="https://img.shields.io/github/stars/jpaulpoliquit/wole?style=flat-square" alt="Stars"></a>
-  <a href="https://github.com/jpaulpoliquit/wole/releases"><img src="https://img.shields.io/github/v/tag/jpaulpoliquit/wole?label=version&style=flat-square" alt="Version"></a>
-  <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License"></a>
-  <a href="https://github.com/jpaulpoliquit/wole/commits"><img src="https://img.shields.io/github/commit-activity/m/jpaulpoliquit/wole?style=flat-square" alt="Commits"></a>
-  <a href="https://x.com/jpaulpoliquit"><img src="https://img.shields.io/badge/follow-jpaulpoliquit-red?style=flat-square&logo=X" alt="X (Twitter)"></a>
-</p>
-
-<p align="center">
-  <img src="src/public/wole.png" alt="Wole - Windows disk cleanup tool" width="1000" />
-</p>
+*Deep clean and optimize your Windows PC.*
 
 ## Features
 
@@ -46,8 +33,8 @@ wole clean --cache --temp     # Clean caches and temp files
 wole clean --trash -y         # Empty Recycle Bin
 wole analyze                  # Visual disk explorer
 wole analyze --interactive    # Interactive disk insights TUI
-wole restore --last           # Restore files from last deletion (bulk)
-wole restore --all            # Restore all Recycle Bin contents (bulk)
+wole restore --last           # Restore files from last deletion
+wole restore --all            # Restore all Recycle Bin contents
 
 wole config --show            # View current configuration
 wole config --edit            # Edit config in your editor
@@ -60,6 +47,10 @@ wole scan --all -v            # Verbose scan with file paths
 wole scan --all --json        # JSON output for scripting
 wole clean --all --dry-run    # Preview cleanup without deleting
 wole clean --all --permanent  # Bypass Recycle Bin (use with caution!)
+wole status                   # Real-time system health dashboard
+wole status --json            # Status output as JSON
+wole optimize --all           # Run all system optimizations
+wole update                   # Check for and install updates
 ```
 
 ## Tips
@@ -69,6 +60,8 @@ wole clean --all --permanent  # Bypass Recycle Bin (use with caution!)
 - **Verbose Mode**: Use `-v` or `-vv` for detailed output showing file paths and scan progress.
 - **Navigation**: TUI supports arrow keys for intuitive navigation.
 - **Configuration**: Run `wole config --edit` to customize thresholds, exclusions, and scan paths.
+- **System Monitoring**: Use `wole status` to monitor system health in real-time. The dashboard auto-refreshes every second.
+- **System Optimization**: Run `wole optimize --all` to perform various Windows optimizations. Some operations require administrator privileges.
 
 ## Features in Detail
 
@@ -117,6 +110,8 @@ $ wole
 │   Analyze     Explore disk usage (folder sizes)         │
 │   Restore     Restore files from last deletion          │
 │   Config      View or modify settings                   │
+│   Optimize    Optimize Windows system performance       │
+│   Status      Real-time system health dashboard         │
 │                                                         │
 ├─────────────────────────────────────────────────────────┤
 │ Select categories to scan:                              │
@@ -214,23 +209,137 @@ $ wole restore --path "C:\Users\user\Documents\file.txt"
 
 Restore operations use bulk restore by default for better performance on Windows.
 
-## Categories
+### System Status Dashboard
+
+Monitor your system's health in real-time with comprehensive metrics.
+
+```bash
+$ wole status
+
+┌─────────────────────────────────────────────────────────┐
+│ Health status: ● 85  Live                               │
+│ DESKTOP-ABC123 · Intel Core i7-9700K · 32.0GB · Windows │
+├─────────────────────────────────────────────────────────┤
+│ ⚙ CPU                    ▦ Memory                      │
+│ Total   ▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱  45.2%      │
+│ Load    2.34 / 1.89 / 1.45 (8 cores)                    │
+│                                                         │
+│ ▤ Disk                    ⚡ Power                     │
+│ Used    ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱  78.5%      │
+│ Free    234.5 GB                                        │
+│                                                         │
+│ ⇅ Network                 ▶ Processes                  │
+│ Down    ▰▰▰▱▱  12.3 MB/s                            │
+│ Up      ▰▱▱▱▱   2.1 MB/s                            │
+│ Status  Connected · WiFi                                │
+│ IPv4    192.168.1.100                                   │
+└─────────────────────────────────────────────────────────┘
+```
+
+**With Battery (Laptop):**
+
+```bash
+$ wole status
+
+┌─────────────────────────────────────────────────────────┐
+│ Health status: ● 85  Live                               │
+│ LAPTOP-ABC123 · Intel Core i7-9700K · 32.0GB · Windows  │
+├─────────────────────────────────────────────────────────┤
+│ ⚙ CPU                                                   │
+│ Total   ▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱  45.2%      │
+│ Load    2.34 / 1.89 / 1.45 (8 cores)                    │
+│                                                         │
+│ ▦ Memory                                                │
+│ Used    ▰▰▰▰▰▰▰▰▱▱▱▱▱▱▱▱▱▱▱▱  45.2%      │
+│ Total   24.5 / 32.0 GB                                   │
+│                                                          │
+│ ▤ Disk                                                   │
+│ Used    ▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▰▱▱▱▱  78.5%       │
+│ Free    234.5 GB                                         │
+│ Read    ▰▰▰▱▱  45.2 MB/s                             │
+│ Write   ▰▱▱▱▱  12.3 MB/s                             │
+│                                                          │
+│ ⚡ Power                                                │
+│ Level   ▰▰▰▰▰▰▰▰▰▰▰▱▱  87.5%                   │
+│ Status  Charging                                         │
+│ Health  Good                                             │
+│ Cycles  245                                              │
+│ Time    2h 15m to full                                   │
+│ Volt    12.45 V                                          │
+│ Power   15.2 W                                           │
+│ Design  85000 mWh                                        │
+│ Full    82000 mWh                                        │
+│                                                          │
+│ ⇅ Network                                                │
+│ Down    ▰▰▰▱▱  12.3 MB/s                             │
+│ Up      ▰▱▱▱▱   2.1 MB/s                             │
+│ Status  Connected · WiFi                                 │
+│ IPv4    192.168.1.100                                    │
+│                                                          │
+│ ▶ Processes                                             │
+│ chrome.exe        1234  ▰▰▰▱▱  15.2%  245M           │
+│ code.exe          5678  ▰▰▱▱▱   8.5%  180M           │
+└──────────────────────────────────────────────────────────┘
+```
+
+**Battery Information Displayed:**
+
+- **Level**: Current battery percentage with visual progress bar
+- **Status**: Charging, Discharging, Full, or Not Charging
+- **Health**: Good (≥80%), Fair (≥50%), or Poor (<50%)
+- **Cycles**: Number of charge/discharge cycles (if available)
+- **Time**: Estimated time until empty or until fully charged
+- **Voltage**: Current battery voltage in volts
+- **Power**: Current power draw/charge rate in watts
+- **Design Capacity**: Original battery capacity when new (mWh)
+- **Full Charge Capacity**: Current maximum capacity (mWh)
+
+On desktop systems without a battery, the Power section shows "Status  Plugged In".
+
+The status dashboard shows:
+
+- **Health Score**: Overall system health (0-100)
+- **CPU**: Usage, load averages, core details, frequency, vendor info
+- **Memory**: Used, total, free, swap/page file
+- **Disk**: Usage, free space, read/write speeds
+- **Power**: Battery level, status, health, cycles, temperature (laptops)
+- **Network**: Download/upload speeds, connection status, IP addresses
+- **Processes**: Top 10 processes by CPU usage
+
+Use `wole status --json` for JSON output suitable for scripting.
+
+## Commands
+
+### Core Commands
+
+- `scan` - Find cleanable files (safe, dry-run)
+- `clean` - Delete selected files
+- `analyze` - Explore disk usage or show detailed analysis
+- `restore` - Restore files from deletion or Recycle Bin
+- `config` - View or modify configuration
+- `status` - Real-time system health dashboard
+- `optimize` - Optimize Windows system performance
+- `update` - Check for and install updates
+- `remove` - Uninstall wole from your system
+
+### Categories
 
 
-| Flag           | Description                                                                         |
-| -------------- | ----------------------------------------------------------------------------------- |
-| `--cache`      | Package manager caches (npm/yarn/pnpm, NuGet, Cargo, pip)                           |
-| `--app-cache`  | Application caches (Discord, VS Code, Slack, Spotify)                               |
-| `--temp`       | Windows temp files older than 1 day                                                 |
-| `--trash`      | Recycle Bin contents                                                                |
-| `--build`      | Build artifacts from inactive projects (`node_modules`, `target/`, `bin/obj`, etc.) |
-| `--browser`    | Browser caches (Chrome, Edge, Firefox, Brave, etc.)                                 |
-| `--system`     | Windows system caches (thumbnails, updates, icons)                                  |
-| `--downloads`  | Old files in Downloads (30+ days)                                                   |
-| `--large`      | Large files (100MB+)                                                                |
-| `--old`        | Files not accessed in 30+ days                                                      |
-| `--empty`      | Empty folders                                                                       |
-| `--duplicates` | Duplicate files                                                                     |
+| Flag             | Description                                                                         |
+| ---------------- | ----------------------------------------------------------------------------------- |
+| `--cache`        | Package manager caches (npm/yarn/pnpm, NuGet, Cargo, pip)                           |
+| `--app-cache`    | Application caches (Discord, VS Code, Slack, Spotify)                               |
+| `--temp`         | Windows temp files older than 1 day                                                 |
+| `--trash`        | Recycle Bin contents                                                                |
+| `--build`        | Build artifacts from inactive projects (`node_modules`, `target/`, `bin/obj`, etc.) |
+| `--browser`      | Browser caches (Chrome, Edge, Firefox, Brave, etc.)                                 |
+| `--system`       | Windows system caches (thumbnails, updates, icons)                                  |
+| `--downloads`    | Old files in Downloads (30+ days)                                                   |
+| `--large`        | Large files (100MB+)                                                                |
+| `--old`          | Files not accessed in 30+ days                                                      |
+| `--empty`        | Empty folders                                                                       |
+| `--duplicates`   | Duplicate files                                                                     |
+| `--applications` | Installed applications                                                              |
 
 
 **Note:** Only `--build` is project-aware. Other categories clean files system-wide.
@@ -256,6 +365,27 @@ Restore operations use bulk restore by default for better performance on Windows
 - `-y`, `--yes` - Skip confirmation
 - `--permanent` - Bypass Recycle Bin
 - `--dry-run` - Preview only
+
+**Status:**
+
+- `--json` - Output as JSON for scripting
+- `-w`, `--watch` - Continuous refresh mode (TUI auto-refreshes by default)
+
+**Optimize:**
+
+- `--all` - Run all optimizations
+- `--dns` - Flush DNS cache
+- `--thumbnails` - Clear thumbnail cache
+- `--icons` - Rebuild icon cache and restart Explorer
+- `--databases` - Optimize browser databases (VACUUM)
+- `--fonts` - Restart font cache service (requires admin)
+- `--memory` - Clear standby memory (requires admin)
+- `--network` - Reset network stack (requires admin)
+- `--bluetooth` - Restart Bluetooth service (requires admin)
+- `--search` - Restart Windows Search service (requires admin)
+- `--explorer` - Restart Windows Explorer
+- `--dry-run` - Preview only
+- `-y`, `--yes` - Skip confirmation for admin operations
 
 ## Configuration
 
@@ -304,4 +434,4 @@ cargo build --release
 
 ## License
 
-[MIT License](LICENSE) — feel free to enjoy and participate in open source.
+[MIT License](LICENSE) — feel free to enjoy and participate in open source

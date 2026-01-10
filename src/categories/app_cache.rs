@@ -221,7 +221,10 @@ pub fn scan(_root: &Path, config: &Config, output_mode: OutputMode) -> Result<Ca
     let appdata = env::var("APPDATA").ok().map(PathBuf::from);
 
     if output_mode != OutputMode::Quiet {
-        println!("  {} Scanning application cache directories...", Theme::muted("→"));
+        println!(
+            "  {} Scanning application cache directories...",
+            Theme::muted("→")
+        );
     }
 
     // 1. Collect all candidate paths first (fast IO check)
@@ -277,22 +280,33 @@ pub fn scan(_root: &Path, config: &Config, output_mode: OutputMode) -> Result<Ca
 
     // Show found caches
     if output_mode != OutputMode::Quiet && !paths_with_sizes.is_empty() {
-        println!("  {} Found {} application caches:", Theme::muted("→"), paths_with_sizes.len());
+        println!(
+            "  {} Found {} application caches:",
+            Theme::muted("→"),
+            paths_with_sizes.len()
+        );
         let show_count = match output_mode {
             OutputMode::VeryVerbose => paths_with_sizes.len(),
             OutputMode::Verbose => paths_with_sizes.len(),
             OutputMode::Normal => paths_with_sizes.len().min(10),
             OutputMode::Quiet => 0,
         };
-        
+
         for (i, (path, size)) in paths_with_sizes.iter().take(show_count).enumerate() {
             let size_str = bytesize::to_string(*size, true);
-            println!("      {} {} ({})", Theme::muted("→"), path.display(), Theme::size(&size_str));
-            
+            println!(
+                "      {} {} ({})",
+                Theme::muted("→"),
+                path.display(),
+                Theme::size(&size_str)
+            );
+
             if i == 9 && output_mode == OutputMode::Normal && paths_with_sizes.len() > 10 {
-                println!("      {} ... and {} more (use -v to see all)", 
-                    Theme::muted("→"), 
-                    paths_with_sizes.len() - 10);
+                println!(
+                    "      {} ... and {} more (use -v to see all)",
+                    Theme::muted("→"),
+                    paths_with_sizes.len() - 10
+                );
                 break;
             }
         }

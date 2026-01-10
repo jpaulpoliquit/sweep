@@ -65,7 +65,7 @@ pub fn scan_directory(path: &Path, max_depth: u8) -> Result<DiskInsights> {
     // Track errors for reporting
     use std::sync::atomic::AtomicUsize;
     let error_count = AtomicUsize::new(0);
-    
+
     // Use jwalk for parallel traversal
     WalkDir::new(path)
         .max_depth(max_depth as usize)
@@ -99,7 +99,7 @@ pub fn scan_directory(path: &Path, max_depth: u8) -> Result<DiskInsights> {
             match entry {
                 Ok(e) => {
                     let entry_path = e.path();
-                    
+
                     // Track directory structure for all directories we encounter
                     if e.file_type().is_dir() {
                         if let Some(parent) = entry_path.parent() {
@@ -114,7 +114,7 @@ pub fn scan_directory(path: &Path, max_depth: u8) -> Result<DiskInsights> {
                             }
                         }
                     }
-                    
+
                     if e.file_type().is_file() {
                         if let Ok(meta) = e.metadata() {
                             let size = meta.len();
@@ -122,7 +122,10 @@ pub fn scan_directory(path: &Path, max_depth: u8) -> Result<DiskInsights> {
                             total_files.fetch_add(1, Ordering::Relaxed);
 
                             // Track file size for largest files list
-                            file_sizes.lock().unwrap().push((entry_path.to_path_buf(), size));
+                            file_sizes
+                                .lock()
+                                .unwrap()
+                                .push((entry_path.to_path_buf(), size));
 
                             // Add file to its parent directory's file list
                             if let Some(parent) = entry_path.parent() {
@@ -134,7 +137,7 @@ pub fn scan_directory(path: &Path, max_depth: u8) -> Result<DiskInsights> {
 
                                 let mut sizes = dir_sizes.lock().unwrap();
                                 *sizes.entry(parent.to_path_buf()).or_insert(0) += size;
-                                
+
                                 let mut counts = dir_file_counts.lock().unwrap();
                                 *counts.entry(parent.to_path_buf()).or_insert(0) += 1;
 
@@ -145,7 +148,7 @@ pub fn scan_directory(path: &Path, max_depth: u8) -> Result<DiskInsights> {
                                     if !ancestor.starts_with(path) && ancestor != path {
                                         break;
                                     }
-                                    
+
                                     *sizes.entry(ancestor.to_path_buf()).or_insert(0) += size;
                                     *counts.entry(ancestor.to_path_buf()).or_insert(0) += 1;
                                     current = ancestor;
@@ -180,7 +183,7 @@ pub fn scan_directory(path: &Path, max_depth: u8) -> Result<DiskInsights> {
     let dir_files = dir_files.into_inner().unwrap();
     let dir_children = dir_children.into_inner().unwrap();
     let mut file_sizes = file_sizes.into_inner().unwrap();
-    
+
     // Warn if many errors were encountered (might indicate permission issues)
     if errors_encountered > 100 {
         eprintln!("Warning: {} directories could not be accessed (likely permission denied). Results may be incomplete.", errors_encountered);
@@ -232,57 +235,57 @@ fn build_folder_tree(
     if max_depth > 0 {
         // Use tracked directory children from scan, but also check filesystem as fallback
         let mut child_dirs: Vec<PathBuf> = Vec::new();
-        
+
         // First, get directories from the scan results
         if let Some(tracked_children) = dir_children.get(&path.to_path_buf()) {
             child_dirs.extend(tracked_children.iter().cloned());
         }
-        
+
         // Also check filesystem to catch any directories that might have been missed
         // (e.g., empty directories or directories that were filtered during scan but should be included)
         if let Ok(entries) = std::fs::read_dir(path) {
             for entry in entries.flatten() {
                 let child_path = entry.path();
-                
+
                 // Only add directories
                 if !child_path.is_dir() {
                     continue;
                 }
-                
+
                 // Skip symlinks and reparse points
                 if utils::should_skip_entry(&child_path) {
                     continue;
                 }
-                
+
                 // Skip system directories
                 if utils::is_system_path(&child_path) {
                     continue;
                 }
-                
+
                 // Add if not already in tracked children
                 if !child_dirs.contains(&child_path) {
                     child_dirs.push(child_path);
                 }
             }
         }
-        
+
         // Build tree for each child directory
         for child_path in child_dirs {
             // Double-check it's still a valid directory and not filtered
             if !child_path.exists() || !child_path.is_dir() {
                 continue;
             }
-            
+
             // Skip symlinks and reparse points
             if utils::should_skip_entry(&child_path) {
                 continue;
             }
-            
+
             // Skip system directories
             if utils::is_system_path(&child_path) {
                 continue;
             }
-            
+
             // Include ALL directories (even if they have no direct files)
             // Build the tree recursively - this will calculate sizes from subdirectories
             // We'll pass the current directory's size as parent_total after calculating it
@@ -375,22 +378,23 @@ fn build_folder_tree(
 /// Directories that should be expanded (show children instead of parent)
 /// This helps show what's actually consuming space inside large directories
 const EXPAND_DIRS: &[&str] = &[
-    "OneDrive",
-    "onedrive", // Case-insensitive matching
+    "OneDrive", "onedrive", // Case-insensitive matching
 ];
 
 /// Check if a directory should be expanded
 fn should_expand_dir(name: &str) -> bool {
-    EXPAND_DIRS.iter().any(|&dir| name.eq_ignore_ascii_case(dir))
+    EXPAND_DIRS
+        .iter()
+        .any(|&dir| name.eq_ignore_ascii_case(dir))
 }
 
 /// Get top-level folders sorted by size, expanding certain directories
-/// 
+///
 /// For directories like OneDrive, shows their children instead of the parent directory
 /// This provides better visibility into what's actually consuming space
 pub fn get_top_folders(node: &FolderNode, limit: usize) -> Vec<&FolderNode> {
     let mut folders: Vec<&FolderNode> = Vec::new();
-    
+
     // Collect folders, expanding certain directories
     for child in &node.children {
         if should_expand_dir(&child.name) && !child.children.is_empty() {
@@ -403,7 +407,7 @@ pub fn get_top_folders(node: &FolderNode, limit: usize) -> Vec<&FolderNode> {
             folders.push(child);
         }
     }
-    
+
     // Sort by size descending
     folders.sort_by(|a, b| b.size.cmp(&a.size));
     folders.into_iter().take(limit).collect()

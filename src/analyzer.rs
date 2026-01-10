@@ -554,7 +554,12 @@ impl Scanner for DownloadsScannerAdapter {
         config: &Config,
     ) -> Result<Vec<CleanableFile>> {
         use crate::categories::downloads;
-        let result = downloads::scan(std::path::Path::new(""), options.min_age_days, config, OutputMode::Normal)?;
+        let result = downloads::scan(
+            std::path::Path::new(""),
+            options.min_age_days,
+            config,
+            OutputMode::Normal,
+        )?;
         Ok(convert_category_result(
             result,
             Category::Downloads,
@@ -581,7 +586,12 @@ impl Scanner for LargeScannerAdapter {
         config: &Config,
     ) -> Result<Vec<CleanableFile>> {
         use crate::categories::large;
-        let result = large::scan(std::path::Path::new(""), options.min_size_bytes, config, OutputMode::Normal)?;
+        let result = large::scan(
+            std::path::Path::new(""),
+            options.min_size_bytes,
+            config,
+            OutputMode::Normal,
+        )?;
         Ok(convert_category_result(
             result,
             Category::Large,

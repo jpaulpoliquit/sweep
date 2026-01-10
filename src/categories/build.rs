@@ -89,7 +89,11 @@ pub fn scan(
 
     // Show discovered projects
     if output_mode != OutputMode::Quiet && !all_project_roots.is_empty() {
-        println!("  {} Found {} projects:", Theme::muted("→"), all_project_roots.len());
+        println!(
+            "  {} Found {} projects:",
+            Theme::muted("→"),
+            all_project_roots.len()
+        );
     }
 
     // Filter to only inactive projects (safety feature: don't delete from active projects)
@@ -97,8 +101,9 @@ pub fn scan(
         .par_iter()
         .filter_map(|project_root| {
             // Check if project is inactive (not recently modified)
-            let is_active = project::is_project_active(project_root, project_age_days).unwrap_or(true);
-            
+            let is_active =
+                project::is_project_active(project_root, project_age_days).unwrap_or(true);
+
             // Show project as it's being checked (always show in Normal+ mode)
             if output_mode != OutputMode::Quiet {
                 let relative = utils::to_relative_path(project_root, root);
@@ -109,7 +114,7 @@ pub fn scan(
                 };
                 println!("    {} {} ({})", Theme::muted("•"), relative, status);
             }
-            
+
             if is_active {
                 None // Active - skip it
             } else {
@@ -127,22 +132,28 @@ pub fn scan(
 
     // Show artifacts as they're found (after collection to avoid parallel counter issues)
     if output_mode != OutputMode::Quiet && !all_artifact_paths.is_empty() {
-        println!("  {} Found {} build artifacts:", Theme::muted("→"), all_artifact_paths.len());
+        println!(
+            "  {} Found {} build artifacts:",
+            Theme::muted("→"),
+            all_artifact_paths.len()
+        );
         let show_count = match output_mode {
             OutputMode::VeryVerbose => all_artifact_paths.len(),
             OutputMode::Verbose => all_artifact_paths.len(),
             OutputMode::Normal => 10.min(all_artifact_paths.len()),
             OutputMode::Quiet => 0,
         };
-        
+
         for (i, artifact_path) in all_artifact_paths.iter().take(show_count).enumerate() {
             let relative = utils::to_relative_path(artifact_path, root);
             println!("      {} {}", Theme::muted("→"), relative);
-            
+
             if i == 9 && output_mode == OutputMode::Normal && all_artifact_paths.len() > 10 {
-                println!("      {} ... and {} more (use -v to see all)", 
-                    Theme::muted("→"), 
-                    all_artifact_paths.len() - 10);
+                println!(
+                    "      {} ... and {} more (use -v to see all)",
+                    Theme::muted("→"),
+                    all_artifact_paths.len() - 10
+                );
                 break;
             }
         }

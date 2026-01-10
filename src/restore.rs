@@ -77,7 +77,7 @@ pub fn normalize_path_for_comparison(path: &str) -> String {
 fn is_temp_directory(path: &Path) -> bool {
     // Normalize path for comparison
     let path_normalized = normalize_path_for_comparison(&path.display().to_string());
-    
+
     // Check %TEMP%
     if let Ok(temp_dir) = env::var("TEMP") {
         let temp_normalized = normalize_path_for_comparison(&temp_dir);
@@ -85,16 +85,17 @@ fn is_temp_directory(path: &Path) -> bool {
             return true;
         }
     }
-    
+
     // Check %LOCALAPPDATA%\Temp
     if let Ok(local_appdata) = env::var("LOCALAPPDATA") {
         let local_temp = PathBuf::from(&local_appdata).join("Temp");
-        let local_temp_normalized = normalize_path_for_comparison(&local_temp.display().to_string());
+        let local_temp_normalized =
+            normalize_path_for_comparison(&local_temp.display().to_string());
         if path_normalized.starts_with(&local_temp_normalized) {
             return true;
         }
     }
-    
+
     // Check for common temp directory patterns
     path_normalized.contains("/temp/") || path_normalized.contains("/tmp/")
 }
@@ -157,7 +158,7 @@ pub fn restore_from_log_with_progress(
             items_to_restore.push((record, trash_item.clone(), record.size_bytes));
             record_to_items
                 .entry(record.path.clone())
-                .or_insert_with(Vec::new)
+                .or_default()
                 .push((record, trash_item.clone(), record.size_bytes));
         } else {
             // No exact match - check if this was a directory
@@ -181,7 +182,7 @@ pub fn restore_from_log_with_progress(
                     items_to_restore.push((record, trash_item.clone(), 0));
                     record_to_items
                         .entry(record.path.clone())
-                        .or_insert_with(Vec::new)
+                        .or_default()
                         .push((record, trash_item.clone(), 0));
                 }
             }
@@ -253,7 +254,7 @@ pub fn restore_from_log_with_progress(
     let mut restored_records: HashSet<String> = HashSet::new();
     let mut processed_count = 0;
 
-    let total_batches = (items_to_restore.len() + BATCH_SIZE - 1) / BATCH_SIZE;
+    let total_batches = items_to_restore.len().div_ceil(BATCH_SIZE);
     let mut batch_num = 0;
 
     for batch in items_to_restore.chunks(BATCH_SIZE) {
@@ -262,13 +263,15 @@ pub fn restore_from_log_with_progress(
             .iter()
             .map(|(_record, item, _size): &(&DeletionRecord, trash::TrashItem, u64)| item.clone())
             .collect();
-        
+
         // Show batch progress
-        if output_mode != crate::output::OutputMode::Quiet && output_mode != crate::output::OutputMode::VeryVerbose {
+        if output_mode != crate::output::OutputMode::Quiet
+            && output_mode != crate::output::OutputMode::VeryVerbose
+        {
             print!("\rProcessing batch {}/{}...", batch_num, total_batches);
             std::io::stdout().flush().ok();
         }
-        
+
         // Update progress callback
         if let Some(ref mut callback) = progress_callback {
             if let Some((record, _, _)) = batch.first() {
@@ -300,7 +303,7 @@ pub fn restore_from_log_with_progress(
                 // Bulk restore failed - fall back to individual restore
                 for (record, trash_item, _size_bytes) in batch {
                     let dest = trash_item.original_parent.join(&trash_item.name);
-                    
+
                     // Skip if destination already exists (may have been restored in partial batch success)
                     if dest.exists() {
                         // Count as restored if it exists (likely from partial batch success)
@@ -320,7 +323,7 @@ pub fn restore_from_log_with_progress(
                         continue;
                     }
 
-                    match restore_file(&trash_item) {
+                    match restore_file(trash_item) {
                         Ok(()) => {
                             if !restored_records.contains(&record.path) {
                                 restored_records.insert(record.path.clone());
@@ -350,9 +353,11 @@ pub fn restore_from_log_with_progress(
     if let Some(sp) = spinner {
         crate::progress::finish_and_clear(&sp);
     }
-    
+
     // Clear batch progress line
-    if output_mode != crate::output::OutputMode::Quiet && output_mode != crate::output::OutputMode::VeryVerbose {
+    if output_mode != crate::output::OutputMode::Quiet
+        && output_mode != crate::output::OutputMode::VeryVerbose
+    {
         print!("\r{}", " ".repeat(50)); // Clear the line
         print!("\r");
         std::io::stdout().flush().ok();
@@ -525,7 +530,10 @@ pub fn restore_all_bin(
 
     if recycle_bin_items.is_empty() {
         if output_mode != crate::output::OutputMode::Quiet {
-            println!("{}", Theme::muted("Recycle Bin is empty. Nothing to restore."));
+            println!(
+                "{}",
+                Theme::muted("Recycle Bin is empty. Nothing to restore.")
+            );
         }
         return Ok(result);
     }
@@ -540,8 +548,7 @@ pub fn restore_all_bin(
     let spinner = if output_mode != crate::output::OutputMode::Quiet {
         Some(crate::progress::create_spinner(&format!(
             "Restoring {} items from Recycle Bin in bulk (batches of {})...",
-            total_items,
-            BATCH_SIZE
+            total_items, BATCH_SIZE
         )))
     } else {
         None
@@ -570,18 +577,20 @@ pub fn restore_all_bin(
         }
     }
     let mut processed_count = 0;
-    let total_batches = (total_items + BATCH_SIZE - 1) / BATCH_SIZE;
+    let total_batches = total_items.div_ceil(BATCH_SIZE);
     let mut batch_num = 0;
 
     for batch in recycle_bin_items.chunks(BATCH_SIZE) {
         batch_num += 1;
-        
+
         // Show batch progress
-        if output_mode != crate::output::OutputMode::Quiet && output_mode != crate::output::OutputMode::VeryVerbose {
+        if output_mode != crate::output::OutputMode::Quiet
+            && output_mode != crate::output::OutputMode::VeryVerbose
+        {
             print!("\rProcessing batch {}/{}...", batch_num, total_batches);
             std::io::stdout().flush().ok();
         }
-        
+
         // Update progress callback
         if let Some(ref mut callback) = progress_callback {
             if let Some(item) = batch.first() {
@@ -614,7 +623,7 @@ pub fn restore_all_bin(
                 // Bulk restore failed - fall back to individual restore
                 for item in batch {
                     let dest = item.original_parent.join(&item.name);
-                    
+
                     // Skip if destination already exists (may have been restored in partial batch success)
                     if dest.exists() {
                         // Count as restored if it exists (likely from partial batch success)
@@ -633,7 +642,7 @@ pub fn restore_all_bin(
                         continue;
                     }
 
-                    match restore_file(&item) {
+                    match restore_file(item) {
                         Ok(()) => {
                             result.restored += 1;
                             // Get file size from restored file
@@ -649,7 +658,11 @@ pub fn restore_all_bin(
                                     "{} Failed to restore {}: {}",
                                     Theme::error("✗"),
                                     Theme::secondary(
-                                        &item.original_parent.join(&item.name).display().to_string()
+                                        &item
+                                            .original_parent
+                                            .join(&item.name)
+                                            .display()
+                                            .to_string()
                                     ),
                                     Theme::error(&err.to_string())
                                 );
@@ -743,7 +756,7 @@ pub fn restore_file(item: &trash::TrashItem) -> Result<()> {
         Err(e) => {
             // Provide more detailed error information
             let error_msg = format!("{}", e);
-            
+
             // Check if this is a temp directory and provide helpful context
             if is_temp_directory(&dest) {
                 // Check if the error is the Windows Recycle Bin error code
@@ -756,7 +769,7 @@ pub fn restore_file(item: &trash::TrashItem) -> Result<()> {
                     ));
                 }
             }
-            
+
             Err(anyhow::anyhow!(
                 "Failed to restore file to {}: {}",
                 dest.display(),

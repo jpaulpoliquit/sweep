@@ -97,7 +97,7 @@ pub enum Screen {
         message: Option<String>,
     },
     Status {
-        status: crate::status::SystemStatus,
+        status: Box<crate::status::SystemStatus>,
         last_refresh: std::time::Instant,
     },
 }
@@ -268,7 +268,7 @@ impl AppState {
         // 5. User Files (requires review)
         // 6. Applications (requires review - uninstalling apps)
         let all_category_names = vec![
-            "System",           // System caches
+            "System",            // System caches
             "Browser",           // Browser caches
             "Temp",              // System temp folders
             "Package cache",     // Package manager caches
@@ -295,7 +295,13 @@ impl AppState {
                     // Hardcoded defaults: System, Browser, Temp, Package cache, Application cache, Trash, Build enabled by default
                     matches!(
                         *name,
-                        "System" | "Browser" | "Temp" | "Package cache" | "Application cache" | "Trash" | "Build"
+                        "System"
+                            | "Browser"
+                            | "Temp"
+                            | "Package cache"
+                            | "Application cache"
+                            | "Trash"
+                            | "Build"
                     )
                 };
 
@@ -1749,7 +1755,7 @@ impl AppState {
         {
             group.expanded = !group.expanded;
         }
-        
+
         // Update the cached groups to preserve ordering
         if let Some(cached_group) = self
             .confirm_groups_cache
@@ -1777,7 +1783,7 @@ impl AppState {
                 folder.expanded = !folder.expanded;
             }
         }
-        
+
         // Update the cached groups to preserve ordering
         if let Some(cached_group) = self
             .confirm_groups_cache

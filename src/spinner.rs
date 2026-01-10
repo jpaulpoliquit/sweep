@@ -4,23 +4,23 @@
 //! and TUI screens.
 
 /// Spinner animation frames (braille-style dots)
-/// 
+///
 /// These are the same characters used by indicatif's default spinner.
 /// Using a shared constant ensures consistency between CLI and TUI.
 pub const SPINNER_FRAMES: &[&str] = &["⠋", "⠙", "⠹", "⠸", "⠼", "⠴", "⠦", "⠧", "⠇", "⠏"];
 
 /// Get the spinner character for a given tick value
-/// 
+///
 /// # Arguments
 /// * `tick` - The current tick/frame number (increments over time)
-/// 
+///
 /// # Returns
 /// A reference to the spinner character string for the current frame
-/// 
+///
 /// # Example
 /// ```
 /// use crate::spinner::get_spinner;
-/// 
+///
 /// let frame0 = get_spinner(0);  // "⠋"
 /// let frame1 = get_spinner(2);  // "⠙" (tick/2 for slower animation)
 /// ```
@@ -29,7 +29,7 @@ pub fn get_spinner(tick: u64) -> &'static str {
 }
 
 /// Get spinner frames as a string (for indicatif ProgressBar)
-/// 
+///
 /// Used by CLI progress indicators that use indicatif.
 pub fn spinner_chars() -> &'static str {
     "⠋⠙⠹⠸⠼⠴⠦⠧⠇⠏"

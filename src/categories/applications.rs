@@ -27,7 +27,7 @@ fn should_exclude_app(app: &InstalledApp) -> bool {
     // Only exclude apps in critical Windows system directories
     // This allows Microsoft Store apps and regular Microsoft applications
     let install_str = app.install_location.to_string_lossy().to_lowercase();
-    
+
     // Exclude only core Windows system directories
     if install_str.contains("\\windows\\system32\\")
         || install_str.contains("\\windows\\syswow64\\")
@@ -150,10 +150,7 @@ pub fn scan(_root: &Path, config: &Config, output_mode: OutputMode) -> Result<Ca
     #[cfg(windows)]
     {
         if output_mode != OutputMode::Quiet {
-            println!(
-                "  {} Scanning installed applications...",
-                Theme::muted("→")
-            );
+            println!("  {} Scanning installed applications...", Theme::muted("→"));
         }
 
         let apps = read_registry_apps()?;

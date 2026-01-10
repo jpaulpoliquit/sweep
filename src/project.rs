@@ -2,10 +2,10 @@ use crate::config::Config;
 use anyhow::Result;
 use chrono::{DateTime, Duration, Utc};
 use jwalk::WalkDir;
+use std::cell::RefCell;
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
-use std::cell::RefCell;
 
 // Thread-local cache for project active status to avoid repeated file system checks
 thread_local! {

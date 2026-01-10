@@ -12,30 +12,30 @@ use std::path::{Path, PathBuf};
 /// Read a line from stdin, handling terminal focus loss issues on Windows.
 /// This function ensures stdin is properly synchronized and clears any stale input
 /// before reading, which fixes issues when the terminal loses and regains focus.
-/// 
+///
 /// On Windows, when a terminal loses focus and regains it, stdin can be in a
 /// problematic state. This function ensures we get a fresh stdin handle each time,
 /// which helps resolve focus-related input issues.
 fn read_line_from_stdin() -> io::Result<String> {
     // Flush stdout to ensure prompt is visible before reading
     io::stdout().flush()?;
-    
+
     // Always get a fresh stdin handle to avoid issues with stale locks
     // This is especially important on Windows when the terminal loses focus
     let mut input = String::new();
-    
+
     // Use BufRead for better control and proper buffering
     use std::io::BufRead;
-    
+
     // Get a fresh stdin handle each time (don't reuse a locked handle)
     // This ensures we're reading from the current terminal state
     let stdin = io::stdin();
     let mut handle = stdin.lock();
-    
+
     // Read a line - this will block until the user types and presses Enter
     // On Windows, getting a fresh handle helps when the terminal has lost focus
     handle.read_line(&mut input)?;
-    
+
     Ok(input)
 }
 
@@ -75,16 +75,15 @@ fn batch_clean_category_internal(
     history: Option<&mut DeletionLog>,
     mode: OutputMode,
 ) -> (u64, u64) {
-    
     if paths.is_empty() {
         return (0, 0);
     }
-    
+
     if let Some(pb) = progress {
         let msg = format!("Cleaning {}...", category_name);
         pb.set_message(msg);
     }
-    
+
     if dry_run {
         let count = paths.len() as u64;
         if let Some(pb) = progress {
@@ -92,7 +91,7 @@ fn batch_clean_category_internal(
         }
         return (count, 0);
     }
-    
+
     // Calculate sizes BEFORE deletion (critical for accurate logging)
     // Once files are deleted, we can't get their sizes anymore
     let mut path_sizes: HashMap<PathBuf, u64> = HashMap::new();
@@ -106,11 +105,11 @@ fn batch_clean_category_internal(
             path_sizes.insert(path.clone(), size);
         }
     }
-    
+
     // Use batch deletion for much better performance
     // Batch deletion completes instantly, so progress updates happen after completion
     let (success_count, error_count, deleted_paths) = clean_paths_batch(paths, permanent);
-    
+
     // Log successes and failures using pre-calculated sizes
     if let Some(log) = history {
         for path in &deleted_paths {
@@ -121,16 +120,22 @@ fn batch_clean_category_internal(
         for path in paths {
             if !deleted_paths.contains(path) {
                 let size = path_sizes.get(path).copied().unwrap_or(0);
-                log.log_failure(path, size, category_name, permanent, "Batch deletion failed");
+                log.log_failure(
+                    path,
+                    size,
+                    category_name,
+                    permanent,
+                    "Batch deletion failed",
+                );
             }
         }
     }
-    
+
     // Update progress
     if let Some(pb) = progress {
         pb.inc(success_count as u64);
     }
-    
+
     // Report errors
     if error_count > 0 && mode != OutputMode::Quiet {
         eprintln!(
@@ -139,7 +144,7 @@ fn batch_clean_category_internal(
             category_name
         );
     }
-    
+
     (success_count as u64, error_count as u64)
 }
 
@@ -211,7 +216,7 @@ pub fn clean_all(
         let trimmed = input.trim().to_lowercase();
         // Accept: "y", "yes" (and their uppercase variants)
         let confirmed = trimmed == "y" || trimmed == "yes";
-        
+
         if !confirmed {
             println!("{}", Theme::muted("Cancelled."));
             return Ok(());
@@ -686,7 +691,7 @@ pub fn clean_paths_batch(
     // This provides defense-in-depth protection
     let mut safe_paths = Vec::with_capacity(paths.len());
     let mut system_path_count = 0;
-    
+
     for path in paths {
         if utils::is_system_path(path) {
             system_path_count += 1;

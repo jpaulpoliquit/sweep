@@ -91,7 +91,11 @@ pub fn print_human(results: &ScanResults, mode: OutputMode) {
     print_human_with_options(results, mode, None)
 }
 
-pub fn print_human_with_options(results: &ScanResults, mode: OutputMode, options: Option<&ScanOptions>) {
+pub fn print_human_with_options(
+    results: &ScanResults,
+    mode: OutputMode,
+    options: Option<&ScanOptions>,
+) {
     if mode == OutputMode::Quiet {
         return;
     }
@@ -122,7 +126,11 @@ pub fn print_human_with_options(results: &ScanResults, mode: OutputMode, options
         ("Downloads", &results.downloads, "[OK] Old files"),
         ("Large", &results.large, "[!] Review suggested"),
         ("Old", &results.old, "[!] Review suggested"),
-        ("Applications", &results.applications, "[!] Review suggested"),
+        (
+            "Applications",
+            &results.applications,
+            "[!] Review suggested",
+        ),
         ("Browser", &results.browser, "[OK] Safe to clean"),
         ("System", &results.system, "[OK] Safe to clean"),
         ("Empty", &results.empty, "[OK] Safe to clean"),
@@ -145,16 +153,19 @@ pub fn print_human_with_options(results: &ScanResults, mode: OutputMode, options
             );
 
             // Special handling for duplicates: show groups in verbose mode
-            if name == "Duplicates" && (mode == OutputMode::Verbose || mode == OutputMode::VeryVerbose) {
+            if name == "Duplicates"
+                && (mode == OutputMode::Verbose || mode == OutputMode::VeryVerbose)
+            {
                 if let Some(ref groups) = results.duplicates_groups {
                     let show_groups = if mode == OutputMode::Verbose {
                         std::cmp::min(5, groups.len())
                     } else {
                         groups.len()
                     };
-                    
+
                     for (idx, group) in groups.iter().take(show_groups).enumerate() {
-                        println!("  {} Group {} ({} files, {} each):", 
+                        println!(
+                            "  {} Group {} ({} files, {} each):",
                             Theme::muted("└─"),
                             idx + 1,
                             group.paths.len(),
@@ -164,7 +175,7 @@ pub fn print_human_with_options(results: &ScanResults, mode: OutputMode, options
                             println!("     {}", Theme::muted(&path.display().to_string()));
                         }
                     }
-                    
+
                     if groups.len() > show_groups {
                         println!(
                             "  {} ... and {} more groups",
@@ -595,16 +606,18 @@ pub fn print_analyze(results: &ScanResults, mode: OutputMode) {
         );
 
         // Special handling for duplicates: show groups in verbose mode
-        if *name == "Duplicates" && (mode == OutputMode::Verbose || mode == OutputMode::VeryVerbose) {
+        if *name == "Duplicates" && (mode == OutputMode::Verbose || mode == OutputMode::VeryVerbose)
+        {
             if let Some(ref groups) = results.duplicates_groups {
                 let show_groups = if mode == OutputMode::Verbose {
                     std::cmp::min(5, groups.len())
                 } else {
                     groups.len()
                 };
-                
+
                 for (idx, group) in groups.iter().take(show_groups).enumerate() {
-                    println!("  {} Group {} ({} files, {} each):", 
+                    println!(
+                        "  {} Group {} ({} files, {} each):",
                         Theme::muted("└─"),
                         idx + 1,
                         group.paths.len(),
@@ -614,7 +627,7 @@ pub fn print_analyze(results: &ScanResults, mode: OutputMode) {
                         println!("     {}", Theme::muted(&path.display().to_string()));
                     }
                 }
-                
+
                 if groups.len() > show_groups {
                     println!(
                         "  {} ... and {} more groups",
@@ -642,7 +655,9 @@ pub fn print_analyze(results: &ScanResults, mode: OutputMode) {
                     }
                 }
             }
-        } else if (mode == OutputMode::Verbose || mode == OutputMode::VeryVerbose) && !result.paths.is_empty() {
+        } else if (mode == OutputMode::Verbose || mode == OutputMode::VeryVerbose)
+            && !result.paths.is_empty()
+        {
             // Show paths for other categories in verbose mode
             let show_count = if mode == OutputMode::Verbose {
                 std::cmp::min(3, result.paths.len())
@@ -749,17 +764,22 @@ pub fn print_disk_insights(
         // Get display name - use relative path from root if it's deeper than one level
         let display_name = if folder.path != root_path && folder.path.starts_with(root_path) {
             // Show relative path from root (e.g., "OneDrive/Pictures" instead of just "Pictures")
-            folder.path.strip_prefix(root_path)
+            folder
+                .path
+                .strip_prefix(root_path)
                 .map(|p| {
                     // Remove leading separator and normalize
-                    p.to_string_lossy().replace('\\', "/").trim_start_matches('/').to_string()
+                    p.to_string_lossy()
+                        .replace('\\', "/")
+                        .trim_start_matches('/')
+                        .to_string()
                 })
                 .unwrap_or_else(|_| folder.name.clone())
         } else {
             folder.name.clone()
         };
 
-        // Calculate percentage relative to root total (for expanded directories, 
+        // Calculate percentage relative to root total (for expanded directories,
         // folder.percentage is relative to its parent, not the root)
         let root_percentage = if insights.total_size > 0 {
             (folder.size as f64 / insights.total_size as f64) * 100.0

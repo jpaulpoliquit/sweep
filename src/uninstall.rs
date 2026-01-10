@@ -1,15 +1,15 @@
 use anyhow::{Context, Result};
+use std::env;
 use std::fs;
 use std::path::PathBuf;
-use std::env;
 
-use crate::theme::Theme;
 use crate::output::OutputMode;
+use crate::theme::Theme;
 
 /// Get the installation directory where wole.exe is located
 pub fn get_install_dir() -> Result<PathBuf> {
-    let localappdata = env::var("LOCALAPPDATA")
-        .context("LOCALAPPDATA environment variable not set")?;
+    let localappdata =
+        env::var("LOCALAPPDATA").context("LOCALAPPDATA environment variable not set")?;
     Ok(PathBuf::from(localappdata).join("wole").join("bin"))
 }
 
@@ -20,22 +20,21 @@ pub fn get_executable_path() -> Result<PathBuf> {
 
 /// Get the config directory path
 pub fn get_config_dir() -> Result<PathBuf> {
-    let appdata = env::var("APPDATA")
-        .context("APPDATA environment variable not set")?;
+    let appdata = env::var("APPDATA").context("APPDATA environment variable not set")?;
     Ok(PathBuf::from(appdata).join("wole"))
 }
 
 /// Get the data directory path (contains history, etc.)
 pub fn get_data_dir() -> Result<PathBuf> {
-    let localappdata = env::var("LOCALAPPDATA")
-        .context("LOCALAPPDATA environment variable not set")?;
+    let localappdata =
+        env::var("LOCALAPPDATA").context("LOCALAPPDATA environment variable not set")?;
     Ok(PathBuf::from(localappdata).join("wole"))
 }
 
 /// Remove wole from PATH
 fn remove_from_path(output_mode: OutputMode) -> Result<()> {
     let install_dir = get_install_dir()?;
-    
+
     // Normalize the path
     let install_dir_normalized = install_dir
         .canonicalize()
@@ -49,7 +48,7 @@ fn remove_from_path(output_mode: OutputMode) -> Result<()> {
     #[cfg(windows)]
     {
         use std::process::Command;
-        
+
         // Use PowerShell to update the PATH in the registry
         let ps_script = format!(
             r#"
@@ -82,7 +81,13 @@ fn remove_from_path(output_mode: OutputMode) -> Result<()> {
         );
 
         let output = Command::new("powershell")
-            .args(&["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", &ps_script])
+            .args([
+                "-NoProfile",
+                "-ExecutionPolicy",
+                "Bypass",
+                "-Command",
+                &ps_script,
+            ])
             .output()
             .context("Failed to execute PowerShell to update PATH")?;
 
@@ -100,21 +105,20 @@ fn remove_from_path(output_mode: OutputMode) -> Result<()> {
 }
 
 /// Uninstall wole
-pub fn uninstall(
-    remove_config: bool,
-    remove_data: bool,
-    output_mode: OutputMode,
-) -> Result<()> {
+pub fn uninstall(remove_config: bool, remove_data: bool, output_mode: OutputMode) -> Result<()> {
     // Check if executable exists
     let exe_path = get_executable_path()?;
     let install_dir = get_install_dir()?;
-    
+
     let exe_existed = exe_path.exists();
-    
+
     if !exe_existed {
         if output_mode != OutputMode::Quiet {
-            eprintln!("{} wole executable not found at {}", 
-                Theme::warning("Warning"), exe_path.display());
+            eprintln!(
+                "{} wole executable not found at {}",
+                Theme::warning("Warning"),
+                exe_path.display()
+            );
             eprintln!("It may have already been removed or installed in a different location.");
             eprintln!("Continuing with PATH cleanup and optional directory removal...");
         }
@@ -149,8 +153,9 @@ pub fn uninstall(
                 Ok(mut entries) => {
                     if entries.next().is_none() {
                         // Directory is empty, remove it
-                        fs::remove_dir(&install_dir)
-                            .with_context(|| format!("Failed to remove directory: {}", install_dir.display()))?;
+                        fs::remove_dir(&install_dir).with_context(|| {
+                            format!("Failed to remove directory: {}", install_dir.display())
+                        })?;
                         if output_mode != OutputMode::Quiet {
                             println!("{} Removed empty bin directory", Theme::success("OK"));
                         }
@@ -170,8 +175,12 @@ pub fn uninstall(
     if remove_config {
         let config_dir = get_config_dir()?;
         if config_dir.exists() {
-            fs::remove_dir_all(&config_dir)
-                .with_context(|| format!("Failed to remove config directory: {}", config_dir.display()))?;
+            fs::remove_dir_all(&config_dir).with_context(|| {
+                format!(
+                    "Failed to remove config directory: {}",
+                    config_dir.display()
+                )
+            })?;
             if output_mode != OutputMode::Quiet {
                 println!("{} Removed config directory", Theme::success("OK"));
             }
@@ -182,10 +191,14 @@ pub fn uninstall(
     if remove_data {
         let data_dir = get_data_dir()?;
         if data_dir.exists() {
-            fs::remove_dir_all(&data_dir)
-                .with_context(|| format!("Failed to remove data directory: {}", data_dir.display()))?;
+            fs::remove_dir_all(&data_dir).with_context(|| {
+                format!("Failed to remove data directory: {}", data_dir.display())
+            })?;
             if output_mode != OutputMode::Quiet {
-                println!("{} Removed data directory (including history)", Theme::success("OK"));
+                println!(
+                    "{} Removed data directory (including history)",
+                    Theme::success("OK")
+                );
             }
         }
     }
@@ -193,7 +206,10 @@ pub fn uninstall(
     if output_mode != OutputMode::Quiet {
         println!();
         if exe_existed {
-            println!("{} wole has been uninstalled successfully!", Theme::success("✓"));
+            println!(
+                "{} wole has been uninstalled successfully!",
+                Theme::success("✓")
+            );
         } else {
             println!("{} Cleanup completed!", Theme::success("✓"));
         }

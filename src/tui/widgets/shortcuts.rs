@@ -144,11 +144,9 @@ pub fn get_shortcuts(
                 vec![("Any Key", "Dashboard")]
             }
         }
-        crate::tui::state::Screen::RestoreSelection { .. } => vec![
-            ("↑↓", "Navigate"),
-            ("Enter", "Select"),
-            ("Esc/B/Q", "Back"),
-        ],
+        crate::tui::state::Screen::RestoreSelection { .. } => {
+            vec![("↑↓", "Navigate"), ("Enter", "Select"), ("Esc/B/Q", "Back")]
+        }
         crate::tui::state::Screen::Restore { .. } => vec![("Esc/B/Q", "Back to Dashboard")],
         crate::tui::state::Screen::DiskInsights { .. } => vec![
             ("↑↓", "Navigate"),
@@ -157,10 +155,7 @@ pub fn get_shortcuts(
             ("S", "Sort"),
             ("Q/Esc", "Quit"),
         ],
-        crate::tui::state::Screen::Status { .. } => vec![
-            ("Esc/Q", "Back"),
-            ("R", "Refresh"),
-        ],
+        crate::tui::state::Screen::Status { .. } => vec![("Esc/Q", "Back"), ("R", "Refresh")],
         crate::tui::state::Screen::Optimize { .. } => {
             if app_state
                 .and_then(|s| {
@@ -175,7 +170,10 @@ pub fn get_shortcuts(
                 vec![("Esc", "Cancel")]
             } else if app_state
                 .and_then(|s| {
-                    if let crate::tui::state::Screen::Optimize { results, cursor, .. } = &s.screen {
+                    if let crate::tui::state::Screen::Optimize {
+                        results, cursor, ..
+                    } = &s.screen
+                    {
                         if !results.is_empty() {
                             if let Some(result) = results.get(*cursor) {
                                 // Check if selected result is a failed operation

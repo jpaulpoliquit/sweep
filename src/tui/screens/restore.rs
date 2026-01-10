@@ -71,7 +71,11 @@ fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bo
             } else {
                 "Restore Complete"
             };
-            let title_block = if restore_all_bin { "Restore All" } else { "Restore" };
+            let title_block = if restore_all_bin {
+                "Restore All"
+            } else {
+                "Restore"
+            };
             let title = Paragraph::new(title_text)
                 .style(Styles::header())
                 .alignment(Alignment::Center)
@@ -132,10 +136,7 @@ fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bo
                 } else {
                     "No files to restore from last deletion session."
                 };
-                lines.push(Line::from(vec![Span::styled(
-                    message,
-                    Styles::muted(),
-                )]));
+                lines.push(Line::from(vec![Span::styled(message, Styles::muted())]));
             }
 
             let content = Paragraph::new(lines)
@@ -164,9 +165,16 @@ fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bo
             let title_text = if restore_all_bin {
                 format!("{}  Restoring all Recycle Bin contents...", spinner_char)
             } else {
-                format!("{}  Restoring files from last deletion session...", spinner_char)
+                format!(
+                    "{}  Restoring files from last deletion session...",
+                    spinner_char
+                )
             };
-            let title_block = if restore_all_bin { "Restore All" } else { "Restore" };
+            let title_block = if restore_all_bin {
+                "Restore All"
+            } else {
+                "Restore"
+            };
             let title = Paragraph::new(Line::from(vec![Span::styled(
                 title_text,
                 Styles::emphasis(),
@@ -248,11 +256,21 @@ fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bo
             // Show "Preparing..." message with spinner
             let spinner_char = spinner::get_spinner(app_state.tick);
             let message_text = if restore_all_bin {
-                format!("{}  Preparing to restore all Recycle Bin contents...", spinner_char)
+                format!(
+                    "{}  Preparing to restore all Recycle Bin contents...",
+                    spinner_char
+                )
             } else {
-                format!("{}  Preparing to restore files from last deletion...", spinner_char)
+                format!(
+                    "{}  Preparing to restore files from last deletion...",
+                    spinner_char
+                )
             };
-            let message_block = if restore_all_bin { "Restore All" } else { "Restore" };
+            let message_block = if restore_all_bin {
+                "Restore All"
+            } else {
+                "Restore"
+            };
             let message = Paragraph::new(Line::from(vec![Span::styled(
                 message_text,
                 Styles::emphasis(),

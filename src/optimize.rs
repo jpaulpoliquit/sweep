@@ -68,7 +68,7 @@ pub fn is_admin() -> bool {
     // This is a simple heuristic - not 100% accurate but good enough
     let system_root = env::var("SystemRoot").unwrap_or_else(|_| "C:\\Windows".to_string());
     let test_path = PathBuf::from(&system_root).join("System32\\config\\system");
-    
+
     // Try to open the file - if we can, we likely have admin rights
     fs::metadata(&test_path).is_ok()
 }
@@ -76,9 +76,13 @@ pub fn is_admin() -> bool {
 /// Flush DNS cache using ipconfig /flushdns
 pub fn flush_dns_cache(dry_run: bool) -> OptimizeResult {
     let action = "Flush DNS Cache";
-    
+
     if dry_run {
-        return OptimizeResult::skipped(action, "Dry run mode - would run: ipconfig /flushdns", false);
+        return OptimizeResult::skipped(
+            action,
+            "Dry run mode - would run: ipconfig /flushdns",
+            false,
+        );
     }
 
     match Command::new("ipconfig").arg("/flushdns").output() {
@@ -87,24 +91,35 @@ pub fn flush_dns_cache(dry_run: bool) -> OptimizeResult {
                 OptimizeResult::success(action, "DNS cache flushed successfully", false)
             } else {
                 let stderr = String::from_utf8_lossy(&output.stderr);
-                OptimizeResult::failure(action, &format!("Failed to flush DNS cache: {}", stderr), false)
+                OptimizeResult::failure(
+                    action,
+                    &format!("Failed to flush DNS cache: {}", stderr),
+                    false,
+                )
             }
         }
-        Err(e) => OptimizeResult::failure(action, &format!("Failed to execute ipconfig: {}", e), false),
+        Err(e) => {
+            OptimizeResult::failure(action, &format!("Failed to execute ipconfig: {}", e), false)
+        }
     }
 }
 
 /// Clear thumbnail cache files from Windows Explorer
 pub fn clear_thumbnail_cache(dry_run: bool) -> OptimizeResult {
     let action = "Clear Thumbnail Cache";
-    
+
     let local_app_data = match env::var("LOCALAPPDATA") {
         Ok(path) => PathBuf::from(path),
-        Err(_) => return OptimizeResult::failure(action, "Could not find LOCALAPPDATA path", false),
+        Err(_) => {
+            return OptimizeResult::failure(action, "Could not find LOCALAPPDATA path", false)
+        }
     };
 
-    let explorer_path = local_app_data.join("Microsoft").join("Windows").join("Explorer");
-    
+    let explorer_path = local_app_data
+        .join("Microsoft")
+        .join("Windows")
+        .join("Explorer");
+
     if !explorer_path.exists() {
         return OptimizeResult::skipped(action, "Explorer cache directory not found", false);
     }
@@ -112,7 +127,10 @@ pub fn clear_thumbnail_cache(dry_run: bool) -> OptimizeResult {
     if dry_run {
         return OptimizeResult::skipped(
             action,
-            &format!("Dry run mode - would delete thumbcache_*.db files in {}", explorer_path.display()),
+            &format!(
+                "Dry run mode - would delete thumbcache_*.db files in {}",
+                explorer_path.display()
+            ),
             false,
         );
     }
@@ -138,13 +156,19 @@ pub fn clear_thumbnail_cache(dry_run: bool) -> OptimizeResult {
     if deleted_count > 0 || failed_count == 0 {
         OptimizeResult::success(
             action,
-            &format!("Deleted {} thumbnail cache files ({} locked/skipped)", deleted_count, failed_count),
+            &format!(
+                "Deleted {} thumbnail cache files ({} locked/skipped)",
+                deleted_count, failed_count
+            ),
             false,
         )
     } else {
         OptimizeResult::failure(
             action,
-            &format!("Could not delete thumbnail cache files ({} locked)", failed_count),
+            &format!(
+                "Could not delete thumbnail cache files ({} locked)",
+                failed_count
+            ),
             false,
         )
     }
@@ -153,13 +177,18 @@ pub fn clear_thumbnail_cache(dry_run: bool) -> OptimizeResult {
 /// Rebuild icon cache by deleting IconCache.db and iconcache_*.db files
 pub fn rebuild_icon_cache(dry_run: bool, restart_explorer: bool) -> OptimizeResult {
     let action = "Rebuild Icon Cache";
-    
+
     let local_app_data = match env::var("LOCALAPPDATA") {
         Ok(path) => PathBuf::from(path),
-        Err(_) => return OptimizeResult::failure(action, "Could not find LOCALAPPDATA path", false),
+        Err(_) => {
+            return OptimizeResult::failure(action, "Could not find LOCALAPPDATA path", false)
+        }
     };
 
-    let explorer_path = local_app_data.join("Microsoft").join("Windows").join("Explorer");
+    let explorer_path = local_app_data
+        .join("Microsoft")
+        .join("Windows")
+        .join("Explorer");
     let icon_cache_path = local_app_data.join("IconCache.db");
 
     if dry_run {
@@ -167,7 +196,10 @@ pub fn rebuild_icon_cache(dry_run: bool, restart_explorer: bool) -> OptimizeResu
         if icon_cache_path.exists() {
             msg.push_str(&format!("{}, ", icon_cache_path.display()));
         }
-        msg.push_str(&format!("iconcache_*.db files in {}", explorer_path.display()));
+        msg.push_str(&format!(
+            "iconcache_*.db files in {}",
+            explorer_path.display()
+        ));
         if restart_explorer {
             msg.push_str(" and restart Explorer");
         }
@@ -213,7 +245,11 @@ pub fn rebuild_icon_cache(dry_run: bool, restart_explorer: bool) -> OptimizeResu
             "Deleted {} icon cache files ({} locked/skipped){}",
             deleted_count,
             failed_count,
-            if restart_explorer { ", Explorer restarted" } else { "" }
+            if restart_explorer {
+                ", Explorer restarted"
+            } else {
+                ""
+            }
         ),
         false,
     )
@@ -222,10 +258,12 @@ pub fn rebuild_icon_cache(dry_run: bool, restart_explorer: bool) -> OptimizeResu
 /// Optimize browser SQLite databases using VACUUM
 pub fn vacuum_browser_databases(dry_run: bool) -> OptimizeResult {
     let action = "Optimize Browser Databases";
-    
+
     let local_app_data = match env::var("LOCALAPPDATA") {
         Ok(path) => PathBuf::from(path),
-        Err(_) => return OptimizeResult::failure(action, "Could not find LOCALAPPDATA path", false),
+        Err(_) => {
+            return OptimizeResult::failure(action, "Could not find LOCALAPPDATA path", false)
+        }
     };
 
     let app_data = match env::var("APPDATA") {
@@ -237,7 +275,11 @@ pub fn vacuum_browser_databases(dry_run: bool) -> OptimizeResult {
     let mut db_paths: Vec<PathBuf> = Vec::new();
 
     // Microsoft Edge
-    let edge_default = local_app_data.join("Microsoft").join("Edge").join("User Data").join("Default");
+    let edge_default = local_app_data
+        .join("Microsoft")
+        .join("Edge")
+        .join("User Data")
+        .join("Default");
     for db_name in &["History", "Cookies", "Web Data", "Favicons"] {
         let path = edge_default.join(db_name);
         if path.exists() {
@@ -246,7 +288,11 @@ pub fn vacuum_browser_databases(dry_run: bool) -> OptimizeResult {
     }
 
     // Google Chrome
-    let chrome_default = local_app_data.join("Google").join("Chrome").join("User Data").join("Default");
+    let chrome_default = local_app_data
+        .join("Google")
+        .join("Chrome")
+        .join("User Data")
+        .join("Default");
     for db_name in &["History", "Cookies", "Web Data", "Favicons"] {
         let path = chrome_default.join(db_name);
         if path.exists() {
@@ -261,7 +307,12 @@ pub fn vacuum_browser_databases(dry_run: bool) -> OptimizeResult {
             for entry in entries.flatten() {
                 let profile_path = entry.path();
                 if profile_path.is_dir() {
-                    for db_name in &["places.sqlite", "cookies.sqlite", "formhistory.sqlite", "favicons.sqlite"] {
+                    for db_name in &[
+                        "places.sqlite",
+                        "cookies.sqlite",
+                        "formhistory.sqlite",
+                        "favicons.sqlite",
+                    ] {
                         let path = profile_path.join(db_name);
                         if path.exists() {
                             db_paths.push(path);
@@ -279,7 +330,10 @@ pub fn vacuum_browser_databases(dry_run: bool) -> OptimizeResult {
     if dry_run {
         return OptimizeResult::skipped(
             action,
-            &format!("Dry run mode - would VACUUM {} database files", db_paths.len()),
+            &format!(
+                "Dry run mode - would VACUUM {} database files",
+                db_paths.len()
+            ),
             false,
         );
     }
@@ -334,9 +388,13 @@ pub fn vacuum_browser_databases(dry_run: bool) -> OptimizeResult {
 /// Restart the Windows Font Cache Service
 pub fn restart_font_cache_service(dry_run: bool) -> OptimizeResult {
     let action = "Restart Font Cache Service";
-    
+
     if dry_run {
-        return OptimizeResult::skipped(action, "Dry run mode - would restart FontCache service", true);
+        return OptimizeResult::skipped(
+            action,
+            "Dry run mode - would restart FontCache service",
+            true,
+        );
     }
 
     if !is_admin() {
@@ -345,10 +403,10 @@ pub fn restart_font_cache_service(dry_run: bool) -> OptimizeResult {
 
     // Stop the service
     let stop_result = Command::new("net").args(["stop", "FontCache"]).output();
-    
+
     // Small delay
     std::thread::sleep(std::time::Duration::from_millis(500));
-    
+
     // Start the service
     let start_result = Command::new("net").args(["start", "FontCache"]).output();
 
@@ -371,9 +429,13 @@ pub fn restart_font_cache_service(dry_run: bool) -> OptimizeResult {
 /// or direct Windows API calls
 pub fn clear_standby_memory(dry_run: bool) -> OptimizeResult {
     let action = "Clear Standby Memory";
-    
+
     if dry_run {
-        return OptimizeResult::skipped(action, "Dry run mode - would clear standby memory list", true);
+        return OptimizeResult::skipped(
+            action,
+            "Dry run mode - would clear standby memory list",
+            true,
+        );
     }
 
     if !is_admin() {
@@ -393,7 +455,13 @@ pub fn clear_standby_memory(dry_run: bool) -> OptimizeResult {
     "#;
 
     match Command::new("powershell")
-        .args(["-NoProfile", "-ExecutionPolicy", "Bypass", "-Command", script])
+        .args([
+            "-NoProfile",
+            "-ExecutionPolicy",
+            "Bypass",
+            "-Command",
+            script,
+        ])
         .output()
     {
         Ok(output) => {
@@ -404,18 +472,26 @@ pub fn clear_standby_memory(dry_run: bool) -> OptimizeResult {
                 if stderr.is_empty() {
                     OptimizeResult::failure(action, "Failed to clear memory", true)
                 } else {
-                    OptimizeResult::failure(action, &format!("Failed to clear memory: {}", stderr), true)
+                    OptimizeResult::failure(
+                        action,
+                        &format!("Failed to clear memory: {}", stderr),
+                        true,
+                    )
                 }
             }
         }
-        Err(e) => OptimizeResult::failure(action, &format!("Failed to execute PowerShell: {}", e), true),
+        Err(e) => OptimizeResult::failure(
+            action,
+            &format!("Failed to execute PowerShell: {}", e),
+            true,
+        ),
     }
 }
 
 /// Reset network stack (Winsock and IP configuration)
 pub fn reset_network_stack(dry_run: bool) -> OptimizeResult {
     let action = "Reset Network Stack";
-    
+
     if dry_run {
         return OptimizeResult::skipped(
             action,
@@ -430,7 +506,7 @@ pub fn reset_network_stack(dry_run: bool) -> OptimizeResult {
 
     // Reset Winsock
     let winsock_result = Command::new("netsh").args(["winsock", "reset"]).output();
-    
+
     // Reset IP configuration
     let ip_result = Command::new("netsh").args(["int", "ip", "reset"]).output();
 
@@ -438,7 +514,7 @@ pub fn reset_network_stack(dry_run: bool) -> OptimizeResult {
         (Ok(ws), Ok(ip)) => {
             let ws_ok = ws.status.success();
             let ip_ok = ip.status.success();
-            
+
             if ws_ok && ip_ok {
                 OptimizeResult::success(
                     action,
@@ -460,9 +536,13 @@ pub fn reset_network_stack(dry_run: bool) -> OptimizeResult {
 /// Restart the Bluetooth Support Service
 pub fn restart_bluetooth_service(dry_run: bool) -> OptimizeResult {
     let action = "Restart Bluetooth Service";
-    
+
     if dry_run {
-        return OptimizeResult::skipped(action, "Dry run mode - would restart bthserv service", true);
+        return OptimizeResult::skipped(
+            action,
+            "Dry run mode - would restart bthserv service",
+            true,
+        );
     }
 
     if !is_admin() {
@@ -471,10 +551,10 @@ pub fn restart_bluetooth_service(dry_run: bool) -> OptimizeResult {
 
     // Stop the service
     let stop_result = Command::new("net").args(["stop", "bthserv"]).output();
-    
+
     // Small delay
     std::thread::sleep(std::time::Duration::from_millis(500));
-    
+
     // Start the service
     let start_result = Command::new("net").args(["start", "bthserv"]).output();
 
@@ -501,9 +581,13 @@ pub fn restart_bluetooth_service(dry_run: bool) -> OptimizeResult {
 /// Restart the Windows Search service (equivalent to Spotlight rebuild on macOS)
 pub fn restart_windows_search(dry_run: bool) -> OptimizeResult {
     let action = "Restart Windows Search";
-    
+
     if dry_run {
-        return OptimizeResult::skipped(action, "Dry run mode - would restart WSearch service", true);
+        return OptimizeResult::skipped(
+            action,
+            "Dry run mode - would restart WSearch service",
+            true,
+        );
     }
 
     if !is_admin() {
@@ -512,17 +596,21 @@ pub fn restart_windows_search(dry_run: bool) -> OptimizeResult {
 
     // Stop the service
     let stop_result = Command::new("net").args(["stop", "WSearch"]).output();
-    
+
     // Small delay
     std::thread::sleep(std::time::Duration::from_millis(1000));
-    
+
     // Start the service
     let start_result = Command::new("net").args(["start", "WSearch"]).output();
 
     match (stop_result, start_result) {
         (Ok(stop), Ok(start)) => {
             if start.status.success() {
-                OptimizeResult::success(action, "Windows Search service restarted successfully", true)
+                OptimizeResult::success(
+                    action,
+                    "Windows Search service restarted successfully",
+                    true,
+                )
             } else if stop.status.success() {
                 OptimizeResult::failure(action, "Stopped service but failed to restart", true)
             } else {
@@ -536,7 +624,7 @@ pub fn restart_windows_search(dry_run: bool) -> OptimizeResult {
 /// Restart Windows Explorer (equivalent to Dock refresh on macOS)
 pub fn restart_explorer(dry_run: bool) -> OptimizeResult {
     let action = "Restart Explorer";
-    
+
     if dry_run {
         return OptimizeResult::skipped(action, "Dry run mode - would restart explorer.exe", false);
     }
@@ -547,7 +635,7 @@ pub fn restart_explorer(dry_run: bool) -> OptimizeResult {
 /// Internal function to restart Explorer
 fn do_restart_explorer() -> OptimizeResult {
     let action = "Restart Explorer";
-    
+
     // Kill explorer gracefully - redirect output to prevent TUI corruption
     let kill_result = Command::new("taskkill")
         .args(["/F", "/IM", "explorer.exe"])
@@ -572,9 +660,11 @@ fn do_restart_explorer() -> OptimizeResult {
             std::thread::sleep(std::time::Duration::from_millis(500));
             OptimizeResult::success(action, "Explorer restarted successfully", false)
         }
-        (Ok(_), Err(e)) => {
-            OptimizeResult::failure(action, &format!("Killed Explorer but failed to restart: {}", e), false)
-        }
+        (Ok(_), Err(e)) => OptimizeResult::failure(
+            action,
+            &format!("Killed Explorer but failed to restart: {}", e),
+            false,
+        ),
         (Err(e), _) => {
             OptimizeResult::failure(action, &format!("Failed to kill Explorer: {}", e), false)
         }
@@ -600,7 +690,7 @@ pub fn run_optimizations(
     output_mode: OutputMode,
 ) -> Vec<OptimizeResult> {
     let mut results = Vec::new();
-    
+
     // Determine which optimizations to run
     let run_dns = all || dns;
     let run_thumbnails = all || thumbnails;
@@ -616,12 +706,17 @@ pub fn run_optimizations(
     // Check if any admin operations are requested
     let needs_admin = run_fonts || run_memory || run_network || run_bluetooth || run_search;
     let is_admin_user = is_admin();
-    
+
     // If admin operations are needed and we're not running as admin, skip them automatically
     if needs_admin && !is_admin_user && !dry_run {
         if output_mode != OutputMode::Quiet {
             println!();
-            println!("{}", Theme::warning("Running non-admin optimizations only (not running as Administrator)."));
+            println!(
+                "{}",
+                Theme::warning(
+                    "Running non-admin optimizations only (not running as Administrator)."
+                )
+            );
             println!();
         }
         // Skip admin operations if not running as admin
@@ -723,34 +818,43 @@ pub fn run_optimizations(
         .filter(|(requested, _)| *requested)
         .map(|(_, flag)| *flag)
         .collect();
-        
+
         if !skipped_flags.is_empty() {
             println!();
             println!("{}", Theme::divider(60));
             println!();
-            println!("{}", Theme::warning("Skipped admin-required optimizations:"));
+            println!(
+                "{}",
+                Theme::warning("Skipped admin-required optimizations:")
+            );
             for flag in &skipped_flags {
                 println!("  • {}", Theme::muted(flag));
             }
             println!();
-            println!("{}", Theme::primary("To run these, restart as Administrator:"));
-            
+            println!(
+                "{}",
+                Theme::primary("To run these, restart as Administrator:")
+            );
+
             // Build the command with specific flags
             let flags_arg = if all {
                 "--all".to_string()
             } else {
                 skipped_flags.join("','")
             };
-            
-            println!("  {}", Theme::command(&format!(
-                "Start-Process wole -ArgumentList 'optimize','{}' -Verb RunAs",
-                flags_arg
-            )));
+
+            println!(
+                "  {}",
+                Theme::command(&format!(
+                    "Start-Process wole -ArgumentList 'optimize','{}' -Verb RunAs",
+                    flags_arg
+                ))
+            );
             println!();
             println!("{}", Theme::muted("(Run the above command in PowerShell)"));
         }
     }
-    
+
     results
 }
 
@@ -769,15 +873,30 @@ fn print_operation_result(result: &OptimizeResult, output_mode: OutputMode) {
 
     // Clear the line and print result
     print!("\r");
-    
+
     if result.success {
         if result.message.starts_with("Skipped:") {
-            println!("  {} {} - {}", Theme::muted("○"), result.action, Theme::muted(&result.message));
+            println!(
+                "  {} {} - {}",
+                Theme::muted("○"),
+                result.action,
+                Theme::muted(&result.message)
+            );
         } else {
-            println!("  {} {} - {}", Theme::success("✓"), result.action, Theme::success(&result.message));
+            println!(
+                "  {} {} - {}",
+                Theme::success("✓"),
+                result.action,
+                Theme::success(&result.message)
+            );
         }
     } else {
-        println!("  {} {} - {}", Theme::error("✗"), result.action, Theme::error(&result.message));
+        println!(
+            "  {} {} - {}",
+            Theme::error("✗"),
+            result.action,
+            Theme::error(&result.message)
+        );
     }
 }
 
@@ -788,8 +907,14 @@ pub fn print_summary(results: &[OptimizeResult], output_mode: OutputMode) {
     }
 
     let total = results.len();
-    let success = results.iter().filter(|r| r.success && !r.message.starts_with("Skipped:")).count();
-    let skipped = results.iter().filter(|r| r.message.starts_with("Skipped:")).count();
+    let success = results
+        .iter()
+        .filter(|r| r.success && !r.message.starts_with("Skipped:"))
+        .count();
+    let skipped = results
+        .iter()
+        .filter(|r| r.message.starts_with("Skipped:"))
+        .count();
     let failed = results.iter().filter(|r| !r.success).count();
 
     println!();
@@ -803,8 +928,13 @@ pub fn print_summary(results: &[OptimizeResult], output_mode: OutputMode) {
     );
 
     // Show restart hint if network was reset
-    if results.iter().any(|r| r.action == "Reset Network Stack" && r.success && !r.message.starts_with("Skipped:")) {
+    if results.iter().any(|r| {
+        r.action == "Reset Network Stack" && r.success && !r.message.starts_with("Skipped:")
+    }) {
         println!();
-        println!("{}", Theme::warning("Note: A system restart is recommended after network reset."));
+        println!(
+            "{}",
+            Theme::warning("Note: A system restart is recommended after network reset.")
+        );
     }
 }

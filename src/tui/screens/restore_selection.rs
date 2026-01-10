@@ -66,7 +66,7 @@ fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bo
             .direction(Direction::Vertical)
             .constraints([
                 Constraint::Length(3), // Title
-                Constraint::Min(1),   // Options list
+                Constraint::Min(1),    // Options list
             ])
             .split(area);
 

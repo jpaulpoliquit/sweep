@@ -48,15 +48,19 @@ pub fn run(initial_state: Option<AppState>) -> Result<()> {
         app_state.tick = app_state.tick.wrapping_add(1);
 
         // Auto-refresh Status screen every 2 seconds
-        if let crate::tui::state::Screen::Status { ref mut status, ref mut last_refresh } = app_state.screen {
+        if let crate::tui::state::Screen::Status {
+            ref mut status,
+            ref mut last_refresh,
+        } = app_state.screen
+        {
             if last_refresh.elapsed().as_secs() >= 2 {
-                use sysinfo::System;
                 use crate::status::gather_status;
-                
+                use sysinfo::System;
+
                 // Create system and gather status (optimized refresh inside)
                 let mut system = System::new();
                 if let Ok(new_status) = gather_status(&mut system) {
-                    *status = new_status;
+                    **status = new_status;
                     *last_refresh = std::time::Instant::now();
                 }
             }
@@ -82,7 +86,7 @@ pub fn run(initial_state: Option<AppState>) -> Result<()> {
                 restore::get_restore_count()
                     .map_err(|e| anyhow::anyhow!("Failed to get restore count: {}", e))
             };
-            
+
             match result {
                 Ok(total) => {
                     app_state.screen = crate::tui::state::Screen::Restore {
@@ -121,7 +125,7 @@ pub fn run(initial_state: Option<AppState>) -> Result<()> {
                 } else {
                     perform_restore(&mut app_state, &mut terminal)
                 };
-                
+
                 match result {
                     Ok(result) => {
                         app_state.screen = crate::tui::state::Screen::Restore {
@@ -175,8 +179,7 @@ pub fn run(initial_state: Option<AppState>) -> Result<()> {
                     if let Ok(userprofile) = std::env::var("USERPROFILE") {
                         std::path::PathBuf::from(&userprofile)
                     } else {
-                        std::env::current_dir()
-                            .unwrap_or_else(|_| std::path::PathBuf::from("."))
+                        std::env::current_dir().unwrap_or_else(|_| std::path::PathBuf::from("."))
                     }
                 };
 
@@ -192,7 +195,7 @@ pub fn run(initial_state: Option<AppState>) -> Result<()> {
                 // Perform disk insights scan
                 use crate::disk_usage::{scan_directory, SortBy};
                 use crate::utils;
-                
+
                 // Determine appropriate depth based on scan path and config
                 let config = crate::config::Config::load();
                 let is_root_disk = scan_path == utils::get_root_disk_path();
@@ -201,7 +204,7 @@ pub fn run(initial_state: Option<AppState>) -> Result<()> {
                 } else {
                     config.ui.scan_depth_user
                 };
-                
+
                 match scan_directory(&scan_path, effective_depth) {
                     Ok(insights) => {
                         // Check if scan was cancelled
@@ -984,8 +987,8 @@ fn perform_restore_all_bin(
     terminal: &mut ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>,
 ) -> anyhow::Result<restore::RestoreResult> {
     // Get current Recycle Bin contents
-    let recycle_bin_items = trash::os_limited::list()
-        .context("Failed to list Recycle Bin contents")?;
+    let recycle_bin_items =
+        trash::os_limited::list().context("Failed to list Recycle Bin contents")?;
 
     if recycle_bin_items.is_empty() {
         return Ok(restore::RestoreResult::default());
@@ -995,7 +998,8 @@ fn perform_restore_all_bin(
     const BATCH_SIZE: usize = 100;
 
     // Create all parent directories before bulk restore
-    let mut parent_dirs: std::collections::HashSet<std::path::PathBuf> = std::collections::HashSet::new();
+    let mut parent_dirs: std::collections::HashSet<std::path::PathBuf> =
+        std::collections::HashSet::new();
     for item in &recycle_bin_items {
         let dest = item.original_parent.join(&item.name);
         if let Some(parent) = dest.parent() {
@@ -1054,7 +1058,7 @@ fn perform_restore_all_bin(
                 // Bulk restore failed - fall back to individual restore
                 for item in batch {
                     let dest = item.original_parent.join(&item.name);
-                    
+
                     // Skip if destination already exists
                     if dest.exists() {
                         result.restored += 1;
@@ -1064,7 +1068,7 @@ fn perform_restore_all_bin(
                         continue;
                     }
 
-                    match restore::restore_file(&item) {
+                    match restore::restore_file(item) {
                         Ok(()) => {
                             result.restored += 1;
                             // Get file size from restored file

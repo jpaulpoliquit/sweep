@@ -49,9 +49,7 @@ pub fn handle_event(
         crate::tui::state::Screen::Optimize { .. } => {
             handle_optimize_event(app_state, key, modifiers)
         }
-        crate::tui::state::Screen::Status { .. } => {
-            handle_status_event(app_state, key, modifiers)
-        }
+        crate::tui::state::Screen::Status { .. } => handle_status_event(app_state, key, modifiers),
     }
 }
 
@@ -456,15 +454,15 @@ fn handle_dashboard_event(
                 }
                 6 => {
                     // Status action - show status screen
-                    use sysinfo::System;
                     use crate::status::gather_status;
-                    
+                    use sysinfo::System;
+
                     let mut system = System::new();
                     system.refresh_all();
                     match gather_status(&mut system) {
                         Ok(status) => {
                             app_state.screen = crate::tui::state::Screen::Status {
-                                status,
+                                status: Box::new(status),
                                 last_refresh: std::time::Instant::now(),
                             };
                         }
@@ -562,14 +560,22 @@ fn handle_config_event(
                             app_state.config.ui.scan_depth_user = v;
                             changed = true;
                         }
-                        Err(_) => err = Some("Invalid number for scan depth (user). Must be 0-255.".to_string()),
+                        Err(_) => {
+                            err = Some(
+                                "Invalid number for scan depth (user). Must be 0-255.".to_string(),
+                            )
+                        }
                     },
                     8 => match raw.parse::<u8>() {
                         Ok(v) => {
                             app_state.config.ui.scan_depth_entire_disk = v;
                             changed = true;
                         }
-                        Err(_) => err = Some("Invalid number for scan depth (disk). Must be 0-255.".to_string()),
+                        Err(_) => {
+                            err = Some(
+                                "Invalid number for scan depth (disk). Must be 0-255.".to_string(),
+                            )
+                        }
                     },
                     _ => {}
                 }
@@ -1551,7 +1557,8 @@ fn handle_confirm_event(
                         if let Some(group) = confirm_groups.get(cat_idx) {
                             if let Some(folder) = group.folder_groups.get(folder_idx) {
                                 if !folder.expanded {
-                                    app_state.toggle_confirm_folder(&group.name, &folder.folder_name);
+                                    app_state
+                                        .toggle_confirm_folder(&group.name, &folder.folder_name);
                                 } else {
                                     move_cursor(app_state, &rows, 1, visible_height);
                                 }
@@ -1584,7 +1591,8 @@ fn handle_confirm_event(
                         if let Some(group) = confirm_groups.get(cat_idx) {
                             if let Some(folder) = group.folder_groups.get(folder_idx) {
                                 if folder.expanded {
-                                    app_state.toggle_confirm_folder(&group.name, &folder.folder_name);
+                                    app_state
+                                        .toggle_confirm_folder(&group.name, &folder.folder_name);
                                     collapsed_now = true;
                                 }
                             }
@@ -1595,19 +1603,17 @@ fn handle_confirm_event(
                             // Find category header for this group
                             // Search backwards for CategoryHeader with same cat_idx
                             for i in (0..app_state.cursor).rev() {
-                                if let Some(r) = rows.get(i) {
-                                    if let crate::tui::state::ConfirmRow::CategoryHeader {
-                                        cat_idx: c_idx,
-                                    } = *r
-                                    {
-                                        if c_idx == cat_idx {
-                                            app_state.cursor = i;
-                                            // Ensure scroll
-                                            if app_state.cursor < app_state.scroll_offset {
-                                                app_state.scroll_offset = app_state.cursor;
-                                            }
-                                            break;
+                                if let Some(crate::tui::state::ConfirmRow::CategoryHeader {
+                                    cat_idx: c_idx,
+                                }) = rows.get(i).copied()
+                                {
+                                    if c_idx == cat_idx {
+                                        app_state.cursor = i;
+                                        // Ensure scroll
+                                        if app_state.cursor < app_state.scroll_offset {
+                                            app_state.scroll_offset = app_state.cursor;
                                         }
+                                        break;
                                     }
                                 }
                             }
@@ -1617,18 +1623,16 @@ fn handle_confirm_event(
                         // Find parent header (Folder or Category)
                         // Search backwards for the first header
                         for i in (0..app_state.cursor).rev() {
-                            if let Some(r) = rows.get(i) {
-                                match *r {
-                                    crate::tui::state::ConfirmRow::FolderHeader { .. }
-                                    | crate::tui::state::ConfirmRow::CategoryHeader { .. } => {
-                                        app_state.cursor = i;
-                                        if app_state.cursor < app_state.scroll_offset {
-                                            app_state.scroll_offset = app_state.cursor;
-                                        }
-                                        break;
-                                    }
-                                    _ => {}
+                            if let Some(
+                                crate::tui::state::ConfirmRow::FolderHeader { .. }
+                                | crate::tui::state::ConfirmRow::CategoryHeader { .. },
+                            ) = rows.get(i).copied()
+                            {
+                                app_state.cursor = i;
+                                if app_state.cursor < app_state.scroll_offset {
+                                    app_state.scroll_offset = app_state.cursor;
                                 }
+                                break;
                             }
                         }
                     }
@@ -1718,7 +1722,8 @@ fn handle_confirm_event(
                                 .find(|g| g.name == group.name)
                             {
                                 // Determine the current state (if any sibling folder is expanded, collapse all; otherwise expand all)
-                                let any_expanded = category_group.folder_groups.iter().any(|f| f.expanded);
+                                let any_expanded =
+                                    category_group.folder_groups.iter().any(|f| f.expanded);
                                 for folder in &mut category_group.folder_groups {
                                     folder.expanded = !any_expanded;
                                 }
@@ -1750,7 +1755,9 @@ fn handle_confirm_event(
                                     } => {
                                         let confirm_groups = app_state.confirm_category_groups();
                                         if let Some(group) = confirm_groups.get(cat_idx) {
-                                            if let Some(folder) = group.folder_groups.get(folder_idx) {
+                                            if let Some(folder) =
+                                                group.folder_groups.get(folder_idx)
+                                            {
                                                 category_name = Some(group.name.clone());
                                                 folder_name = Some(folder.folder_name.clone());
                                             }
@@ -1777,7 +1784,8 @@ fn handle_confirm_event(
                                     .iter_mut()
                                     .find(|g| g.name == cat_name)
                                 {
-                                    let any_expanded = group.folder_groups.iter().any(|f| f.expanded);
+                                    let any_expanded =
+                                        group.folder_groups.iter().any(|f| f.expanded);
                                     for folder in &mut group.folder_groups {
                                         folder.expanded = !any_expanded;
                                     }
@@ -1794,7 +1802,8 @@ fn handle_confirm_event(
                                 }
                             } else {
                                 // Item is directly under category - expand/collapse all sibling categories
-                                let any_expanded = app_state.category_groups.iter().any(|g| g.expanded);
+                                let any_expanded =
+                                    app_state.category_groups.iter().any(|g| g.expanded);
                                 for group in &mut app_state.category_groups {
                                     group.expanded = !any_expanded;
                                 }
@@ -2322,7 +2331,7 @@ fn handle_optimize_event(
                 // Run selected optimizations
                 if !*running && results.is_empty() && !selected.is_empty() {
                     *running = true;
-                    
+
                     let all = selected.len() == OPTIONS_COUNT;
                     let dns = selected.contains(&0);
                     let thumbnails = selected.contains(&1);
@@ -2338,10 +2347,19 @@ fn handle_optimize_event(
                     // Run optimizations with quiet output (TUI will show results)
                     // Explorer restart now uses spawn() instead of output() to avoid blocking
                     let optimize_results = crate::optimize::run_optimizations(
-                        all, dns, thumbnails, icons, databases, fonts,
-                        memory, network, bluetooth, search, explorer,
-                        false, // dry_run
-                        false,  // yes (skip confirmation)
+                        all,
+                        dns,
+                        thumbnails,
+                        icons,
+                        databases,
+                        fonts,
+                        memory,
+                        network,
+                        bluetooth,
+                        search,
+                        explorer,
+                        false,                            // dry_run
+                        false,                            // yes (skip confirmation)
                         crate::output::OutputMode::Quiet, // Quiet mode for TUI
                     );
 
@@ -2352,50 +2370,100 @@ fn handle_optimize_event(
                     // When viewing results, check if user selected a failed operation
                     if *cursor < results.len() {
                         let selected_result = &results[*cursor];
-                        
+
                         // If the selected result failed (admin or otherwise), retry it
                         if !selected_result.success {
                             // Map the result action back to optimization type
                             let action_name = &selected_result.action;
-                            
+
                             // Determine which optimization to run based on action name
-                            let (all, dns, thumbnails, icons, databases, fonts, memory, network, bluetooth, search, explorer) = 
-                                match action_name.as_str() {
-                                    "Flush DNS Cache" => (false, true, false, false, false, false, false, false, false, false, false),
-                                    "Clear Thumbnail Cache" => (false, false, true, false, false, false, false, false, false, false, false),
-                                    "Rebuild Icon Cache" => (false, false, false, true, false, false, false, false, false, false, false),
-                                    "Optimize Browser Databases" => (false, false, false, false, true, false, false, false, false, false, false),
-                                    "Restart Font Cache Service" => (false, false, false, false, false, true, false, false, false, false, false),
-                                    "Clear Standby Memory" => (false, false, false, false, false, false, true, false, false, false, false),
-                                    "Reset Network Stack" => (false, false, false, false, false, false, false, true, false, false, false),
-                                    "Restart Bluetooth Service" => (false, false, false, false, false, false, false, false, true, false, false),
-                                    "Restart Windows Search" => (false, false, false, false, false, false, false, false, false, true, false),
-                                    "Restart Explorer" => (false, false, false, false, false, false, false, false, false, false, true),
-                                    _ => {
-                                        // Unknown action, just go back to options
-                                        results.clear();
-                                        *cursor = 0;
-                                        *message = None;
-                                        return EventResult::Continue;
-                                    }
-                                };
-                            
+                            let (
+                                all,
+                                dns,
+                                thumbnails,
+                                icons,
+                                databases,
+                                fonts,
+                                memory,
+                                network,
+                                bluetooth,
+                                search,
+                                explorer,
+                            ) = match action_name.as_str() {
+                                "Flush DNS Cache" => (
+                                    false, true, false, false, false, false, false, false, false,
+                                    false, false,
+                                ),
+                                "Clear Thumbnail Cache" => (
+                                    false, false, true, false, false, false, false, false, false,
+                                    false, false,
+                                ),
+                                "Rebuild Icon Cache" => (
+                                    false, false, false, true, false, false, false, false, false,
+                                    false, false,
+                                ),
+                                "Optimize Browser Databases" => (
+                                    false, false, false, false, true, false, false, false, false,
+                                    false, false,
+                                ),
+                                "Restart Font Cache Service" => (
+                                    false, false, false, false, false, true, false, false, false,
+                                    false, false,
+                                ),
+                                "Clear Standby Memory" => (
+                                    false, false, false, false, false, false, true, false, false,
+                                    false, false,
+                                ),
+                                "Reset Network Stack" => (
+                                    false, false, false, false, false, false, false, true, false,
+                                    false, false,
+                                ),
+                                "Restart Bluetooth Service" => (
+                                    false, false, false, false, false, false, false, false, true,
+                                    false, false,
+                                ),
+                                "Restart Windows Search" => (
+                                    false, false, false, false, false, false, false, false, false,
+                                    true, false,
+                                ),
+                                "Restart Explorer" => (
+                                    false, false, false, false, false, false, false, false, false,
+                                    false, true,
+                                ),
+                                _ => {
+                                    // Unknown action, just go back to options
+                                    results.clear();
+                                    *cursor = 0;
+                                    *message = None;
+                                    return EventResult::Continue;
+                                }
+                            };
+
                             // Re-run just this optimization
                             *running = true;
                             *message = None;
                             let single_result = crate::optimize::run_optimizations(
-                                all, dns, thumbnails, icons, databases, fonts,
-                                memory, network, bluetooth, search, explorer,
-                                false, // dry_run
-                                false,  // yes (skip confirmation)
+                                all,
+                                dns,
+                                thumbnails,
+                                icons,
+                                databases,
+                                fonts,
+                                memory,
+                                network,
+                                bluetooth,
+                                search,
+                                explorer,
+                                false,                            // dry_run
+                                false,                            // yes (skip confirmation)
                                 crate::output::OutputMode::Quiet, // Quiet mode for TUI
                             );
-                            
+
                             // Replace the old result with the new one
                             if let Some(old_result) = results.get_mut(*cursor) {
                                 if let Some(new_result) = single_result.first() {
                                     *old_result = new_result.clone();
-                                    
+
                                     // If it still failed with admin required, show the PowerShell command
                                     if new_result.requires_admin && !new_result.success {
                                         *message = Some("Run as Admin: Start-Process wole -Verb RunAs (in PowerShell)".to_string());
@@ -2430,7 +2498,11 @@ fn handle_status_event(
     key: KeyCode,
     _modifiers: KeyModifiers,
 ) -> EventResult {
-    if let crate::tui::state::Screen::Status { ref mut status, ref mut last_refresh } = app_state.screen {
+    if let crate::tui::state::Screen::Status {
+        ref mut status,
+        ref mut last_refresh,
+    } = app_state.screen
+    {
         match key {
             KeyCode::Char('q') | KeyCode::Esc | KeyCode::Char('b') => {
                 // Go back to dashboard
@@ -2439,14 +2511,14 @@ fn handle_status_event(
             }
             KeyCode::Char('r') | KeyCode::Char('R') => {
                 // Refresh status
-                use sysinfo::System;
                 use crate::status::gather_status;
-                
+                use sysinfo::System;
+
                 let mut system = System::new();
                 system.refresh_all();
                 match gather_status(&mut system) {
                     Ok(new_status) => {
-                        *status = new_status;
+                        **status = new_status;
                         *last_refresh = std::time::Instant::now();
                     }
                     Err(e) => {
@@ -2477,12 +2549,12 @@ fn handle_optimize_click(app_state: &mut AppState, row: u16, _col: u16) -> Event
         }
 
         let header_height = LOGO_WITH_TAGLINE_HEIGHT;
-        
+
         // Calculate approximate positions
         // Title: 1 line, spacing: 1 line, then list starts
         let title_and_spacing = 2;
         let list_start_y = header_height + title_and_spacing + 1; // +1 for border
-        
+
         if row < list_start_y {
             // Clicked above the list, ignore
             return EventResult::Continue;
@@ -2494,11 +2566,11 @@ fn handle_optimize_click(app_state: &mut AppState, row: u16, _col: u16) -> Event
             // Border adds 2 lines, padding adds 2 lines
             let list_inner_start = list_start_y + 2; // border + padding
             let clicked_row_in_list = row.saturating_sub(list_inner_start);
-            
+
             // Each item is 2 lines, so divide by 2
             let clicked_index = (clicked_row_in_list / 2) as usize;
             const OPTIONS_COUNT: usize = 10;
-            
+
             if clicked_index < OPTIONS_COUNT {
                 *cursor = clicked_index;
                 // Toggle selection on click
@@ -2514,10 +2586,10 @@ fn handle_optimize_click(app_state: &mut AppState, row: u16, _col: u16) -> Event
             // Results mode - calculate which result was clicked
             let list_inner_start = list_start_y + 2; // border + padding
             let clicked_row_in_list = row.saturating_sub(list_inner_start);
-            
+
             // Each result is 1 line
             let clicked_index = clicked_row_in_list as usize;
-            
+
             if clicked_index < results.len() {
                 *cursor = clicked_index;
                 // Clear any messages when clicking

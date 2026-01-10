@@ -97,7 +97,8 @@ pub fn scan_all(
 
     // Store duplicate groups separately (needs to be stored after scan)
     use std::cell::RefCell;
-    let duplicate_groups: RefCell<Option<Vec<crate::categories::duplicates::DuplicateGroup>>> = RefCell::new(None);
+    let duplicate_groups: RefCell<Option<Vec<crate::categories::duplicates::DuplicateGroup>>> =
+        RefCell::new(None);
 
     // Run scans sequentially to avoid disk thrashing and thread pool explosion
     // Each individual scanner (large, duplicates, build) manages its own parallelism
@@ -117,7 +118,7 @@ pub fn scan_all(
                     name, count, total_categories
                 ));
             }
-            
+
             // Show category header in Normal+ mode
             if mode != OutputMode::Quiet {
                 println!();
@@ -133,7 +134,9 @@ pub fn scan_all(
                 ScanTask::Build(age) => {
                     categories::build::scan(&path_owned, *age, Some(&build_config), config, mode)
                 }
-                ScanTask::Downloads(age) => categories::downloads::scan(&path_owned, *age, config, mode),
+                ScanTask::Downloads(age) => {
+                    categories::downloads::scan(&path_owned, *age, config, mode)
+                }
                 ScanTask::Large(size) => categories::large::scan(&path_owned, *size, config, mode),
                 ScanTask::Old(age) => categories::old::scan(&path_owned, *age, config, mode),
                 ScanTask::Browser => categories::browser::scan(&path_owned, config),
@@ -151,7 +154,7 @@ pub fn scan_all(
                             // Store groups for enhanced display
                             *duplicate_groups.borrow_mut() = Some(dup_result.groups.clone());
                             Ok(dup_result.to_category_result())
-                        },
+                        }
                         Err(e) => Err(e),
                     }
                 }
@@ -185,7 +188,7 @@ pub fn scan_all(
                 results.duplicates = r;
                 // Store duplicate groups for enhanced display
                 results.duplicates_groups = duplicate_groups.borrow().clone();
-            },
+            }
             ("applications", Ok(r)) => results.applications = r,
             (name, Err(e)) => {
                 if mode != OutputMode::Quiet {
@@ -349,6 +352,7 @@ mod tests {
             downloads: false,
             large: false,
             old: false,
+            applications: false,
             browser: false,
             system: false,
             empty: false,

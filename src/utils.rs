@@ -18,7 +18,10 @@ pub fn get_root_disk_path() -> PathBuf {
             let dir_str = current_dir.to_string_lossy();
             // Look for drive letter pattern (e.g., "C:\" or "C:")
             if let Some(drive_letter) = dir_str.chars().next() {
-                if drive_letter.is_ascii_alphabetic() && dir_str.len() > 1 && dir_str.chars().nth(1) == Some(':') {
+                if drive_letter.is_ascii_alphabetic()
+                    && dir_str.len() > 1
+                    && dir_str.chars().nth(1) == Some(':')
+                {
                     return PathBuf::from(format!("{}:\\", drive_letter));
                 }
             }
@@ -26,7 +29,7 @@ pub fn get_root_disk_path() -> PathBuf {
         // Fallback to C:\ if we can't determine from current directory
         PathBuf::from("C:\\")
     }
-    
+
     #[cfg(not(windows))]
     {
         // On Unix systems, root is "/"
