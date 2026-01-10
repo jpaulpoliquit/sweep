@@ -614,7 +614,17 @@ pub fn clean_all(
 /// - Checks for locked files before deletion (Windows)
 /// - Uses long path support for paths > 260 characters
 /// - Provides clear error messages
+/// - **CRITICAL**: Blocks deletion of system directories for safety
 pub fn clean_path(path: &Path, permanent: bool) -> Result<()> {
+    // CRITICAL SAFETY CHECK: Never allow deletion of system paths
+    // This provides defense-in-depth even if a system path somehow gets into the deletion list
+    if utils::is_system_path(path) {
+        return Err(anyhow::anyhow!(
+            "Cannot delete system path: {}. System directories are protected from deletion.",
+            path.display()
+        ));
+    }
+
     // Check if file is locked (Windows only)
     if path.is_file() && is_file_locked(path) {
         return Err(anyhow::anyhow!("File is locked by another process"));
@@ -645,6 +655,8 @@ pub fn clean_path(path: &Path, permanent: bool) -> Result<()> {
 /// For Recycle Bin deletion, uses `trash::delete_all()` which is 10-50x faster
 /// than calling `trash::delete()` in a loop due to reduced COM/Shell API overhead.
 ///
+/// **CRITICAL**: System paths are filtered out before deletion for safety.
+///
 /// Returns (success_count, error_count, successfully_deleted_paths)
 pub fn clean_paths_batch(
     paths: &[std::path::PathBuf],
@@ -654,14 +666,33 @@ pub fn clean_paths_batch(
         return (0, 0, Vec::new());
     }
 
+    // CRITICAL SAFETY CHECK: Filter out system paths before any deletion
+    // This provides defense-in-depth protection
+    let mut safe_paths = Vec::with_capacity(paths.len());
+    let mut system_path_count = 0;
+    
+    for path in paths {
+        if utils::is_system_path(path) {
+            system_path_count += 1;
+            #[cfg(debug_assertions)]
+            eprintln!(
+                "[DEBUG] Blocked system path from deletion: {}",
+                path.display()
+            );
+        } else {
+            safe_paths.push(path.clone());
+        }
+    }
+
     let mut success_count = 0;
-    let mut error_count = 0;
-    let mut deleted_paths = Vec::with_capacity(paths.len());
+    let mut error_count = system_path_count; // Count system paths as errors
+    let mut deleted_paths = Vec::with_capacity(safe_paths.len());
 
     if permanent {
         // Permanent deletes are already fast (direct filesystem ops)
         // Delete one-by-one to track individual successes/failures
-        for path in paths {
+        // Note: System paths already filtered out above
+        for path in &safe_paths {
             match clean_path(path, true) {
                 Ok(()) => {
                     success_count += 1;
@@ -673,11 +704,12 @@ pub fn clean_paths_batch(
     } else {
         // Batch to Recycle Bin - this is the big performance win
         // First, filter out locked files and non-existent files (they would cause batch to fail)
+        // Note: System paths already filtered out above
         let mut unlocked: Vec<std::path::PathBuf> = Vec::new();
         let mut locked_count = 0;
         let mut non_existent_count = 0;
 
-        for path in paths {
+        for path in &safe_paths {
             if !path.exists() {
                 non_existent_count += 1;
             } else if path.is_file() && is_file_locked(path) {

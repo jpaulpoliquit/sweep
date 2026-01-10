@@ -35,7 +35,7 @@
 
 **Core Principle: "Safe by Default"**
 
-Sweep is built with a **defensive-first** architecture for filesystem operations. Every deletion defaults to the Recycle Bin, requiring explicit opt-in for permanent deletion.
+Wole is built with a **defensive-first** architecture for filesystem operations. Every deletion defaults to the Recycle Bin, requiring explicit opt-in for permanent deletion.
 
 **Guiding Priorities:**
 
@@ -76,7 +76,7 @@ Sweep implements defense-in-depth with multiple validation layers:
 
 #### Layer 1: System Path Protection
 
-Hardcoded system directories are **unconditionally blocked** from traversal:
+Hardcoded system directories are **unconditionally blocked** from traversal and deletion:
 
 ```rust
 // src/utils.rs - SYSTEM_DIRS constant
@@ -92,9 +92,14 @@ pub const SYSTEM_DIRS: &[&str] = &[
 ];
 ```
 
-**Enforcement:** `is_system_path()` checks all path components against this blocklist before any operation.
+**Enforcement:** 
+- **During scanning:** `is_system_path()` checks all path components against this blocklist before adding to scan results (used in `empty.rs`, `duplicates.rs`, `disk_usage.rs`).
+- **During deletion:** `clean_path()` and `clean_paths_batch()` **reject system paths** before any deletion operation, providing defense-in-depth protection even if a system path somehow gets into the deletion list.
 
-**Code:** `src/utils.rs:491-516`
+**Code:** 
+- `src/utils.rs:519-548` (SYSTEM_DIRS constant and `is_system_path()` function)
+- `src/cleaner.rs:617-641` (deletion-level protection in `clean_path()`)
+- `src/cleaner.rs:649-767` (batch deletion protection in `clean_paths_batch()`)
 
 #### Layer 2: Symlink & Junction Detection
 
