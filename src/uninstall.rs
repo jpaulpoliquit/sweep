@@ -32,6 +32,7 @@ pub fn get_data_dir() -> Result<PathBuf> {
 }
 
 /// Remove wole from PATH
+#[allow(unused_variables)]
 fn remove_from_path(output_mode: OutputMode) -> Result<()> {
     let install_dir = get_install_dir()?;
 

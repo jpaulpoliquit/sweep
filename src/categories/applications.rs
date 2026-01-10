@@ -2,9 +2,7 @@ use crate::config::Config;
 use crate::output::{CategoryResult, OutputMode};
 use crate::scan_events::ScanProgressEvent;
 use crate::theme::Theme;
-use crate::utils;
 use anyhow::{Context, Result};
-use bytesize;
 use std::path::{Path, PathBuf};
 use std::sync::mpsc::Sender;
 
@@ -15,6 +13,7 @@ use winreg::RegKey;
 
 /// Information about an installed application
 #[derive(Debug, Clone)]
+#[allow(dead_code)]
 struct InstalledApp {
     display_name: String,
     install_location: PathBuf,
@@ -23,6 +22,7 @@ struct InstalledApp {
 }
 
 /// Check if an application should be excluded (only truly system-critical apps)
+#[allow(dead_code)]
 fn should_exclude_app(app: &InstalledApp) -> bool {
     // Only exclude apps in critical Windows system directories
     // This allows Microsoft Store apps and regular Microsoft applications
@@ -57,6 +57,7 @@ fn should_exclude_app(app: &InstalledApp) -> bool {
 
 #[cfg(windows)]
 /// Read installed applications from Windows registry
+#[allow(dead_code)]
 fn read_registry_apps() -> Result<Vec<InstalledApp>> {
     let mut apps = Vec::new();
 
@@ -139,14 +140,14 @@ fn read_registry_apps() -> Result<Vec<InstalledApp>> {
 
 #[cfg(not(windows))]
 /// Stub for non-Windows platforms
+#[allow(dead_code)]
 fn read_registry_apps() -> Result<Vec<InstalledApp>> {
     Ok(Vec::new())
 }
 
 /// Scan for installed applications
+#[allow(unused_variables)]
 pub fn scan(_root: &Path, config: &Config, output_mode: OutputMode) -> Result<CategoryResult> {
-    let mut result = CategoryResult::default();
-
     #[cfg(windows)]
     {
         if output_mode != OutputMode::Quiet {
@@ -166,7 +167,7 @@ pub fn scan(_root: &Path, config: &Config, output_mode: OutputMode) -> Result<Ca
             let size = if let Some(est_size) = app.estimated_size {
                 est_size
             } else {
-                utils::calculate_dir_size(&app.install_location)
+                crate::utils::calculate_dir_size(&app.install_location)
             };
 
             if size > 0 {
@@ -185,10 +186,16 @@ pub fn scan(_root: &Path, config: &Config, output_mode: OutputMode) -> Result<Ca
         // Sort by size descending
         apps_with_sizes.sort_by(|a, b| b.1.cmp(&a.1));
 
-        // Store results
-        result.paths = apps_with_sizes.iter().map(|(p, _)| p.clone()).collect();
-        result.size_bytes = apps_with_sizes.iter().map(|(_, size)| *size).sum();
-        result.items = apps_with_sizes.len();
+        // Build result
+        let paths: Vec<PathBuf> = apps_with_sizes.iter().map(|(p, _)| p.clone()).collect();
+        let size_bytes: u64 = apps_with_sizes.iter().map(|(_, size)| *size).sum();
+        let items = apps_with_sizes.len();
+        
+        let mut result = CategoryResult {
+            paths,
+            size_bytes,
+            items,
+        };
 
         if output_mode != OutputMode::Quiet && !apps_with_sizes.is_empty() {
             println!(
@@ -222,6 +229,8 @@ pub fn scan(_root: &Path, config: &Config, output_mode: OutputMode) -> Result<Ca
                 }
             }
         }
+        
+        Ok(result)
     }
 
     #[cfg(not(windows))]
@@ -232,15 +241,13 @@ pub fn scan(_root: &Path, config: &Config, output_mode: OutputMode) -> Result<Ca
                 Theme::muted("→")
             );
         }
+        Ok(CategoryResult::default())
     }
-
-    Ok(result)
 }
 
 /// Scan with real-time progress events (for TUI)
 pub fn scan_with_progress(_root: &Path, tx: &Sender<ScanProgressEvent>) -> Result<CategoryResult> {
     const CATEGORY: &str = "Installed Applications";
-    let mut result = CategoryResult::default();
 
     #[cfg(windows)]
     {
@@ -261,7 +268,7 @@ pub fn scan_with_progress(_root: &Path, tx: &Sender<ScanProgressEvent>) -> Resul
             let size = if let Some(est_size) = app.estimated_size {
                 est_size
             } else {
-                utils::calculate_dir_size(&app.install_location)
+                crate::utils::calculate_dir_size(&app.install_location)
             };
 
             if size > 0 {
@@ -281,17 +288,28 @@ pub fn scan_with_progress(_root: &Path, tx: &Sender<ScanProgressEvent>) -> Resul
         apps_with_sizes.sort_by(|a, b| b.1.cmp(&a.1));
 
         // Build final result
+        let mut items = 0;
+        let mut size_bytes = 0;
+        let mut paths = Vec::new();
         for (path, size) in apps_with_sizes {
-            result.items += 1;
-            result.size_bytes += size;
-            result.paths.push(path);
+            items += 1;
+            size_bytes += size;
+            paths.push(path);
         }
+
+        let result = CategoryResult {
+            paths,
+            size_bytes,
+            items,
+        };
 
         let _ = tx.send(ScanProgressEvent::CategoryFinished {
             category: CATEGORY.to_string(),
             items: result.items,
             size_bytes: result.size_bytes,
         });
+        
+        Ok(result)
     }
 
     #[cfg(not(windows))]
@@ -307,9 +325,9 @@ pub fn scan_with_progress(_root: &Path, tx: &Sender<ScanProgressEvent>) -> Resul
             items: 0,
             size_bytes: 0,
         });
+        
+        Ok(CategoryResult::default())
     }
-
-    Ok(result)
 }
 
 /// Clean (delete) an installed application directory by moving it to the Recycle Bin
