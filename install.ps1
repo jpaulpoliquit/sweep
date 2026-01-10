@@ -259,37 +259,69 @@ try {
     Write-Host ""
     if ($exeExists) {
         Write-Host "✓ wole installed successfully!" -ForegroundColor Green
+        Write-Host "  Location: $TARGET_PATH" -ForegroundColor Gray
+        
+        # Verify file size to ensure download wasn't corrupted
+        $fileSize = (Get-Item $TARGET_PATH).Length
+        if ($fileSize -lt 100000) {
+            Write-Host "⚠ Warning: Executable seems too small ($fileSize bytes) - download may have failed" -ForegroundColor Yellow
+        }
         
         # Try to actually run wole to verify it works
         $woleWorks = $false
+        $woleOutput = ""
+        $woleError = ""
         try {
-            $null = & $TARGET_PATH --version 2>&1
-            if ($LASTEXITCODE -eq 0) {
+            $processInfo = New-Object System.Diagnostics.ProcessStartInfo
+            $processInfo.FileName = $TARGET_PATH
+            $processInfo.Arguments = "--version"
+            $processInfo.RedirectStandardOutput = $true
+            $processInfo.RedirectStandardError = $true
+            $processInfo.UseShellExecute = $false
+            $processInfo.CreateNoWindow = $true
+            
+            $process = New-Object System.Diagnostics.Process
+            $process.StartInfo = $processInfo
+            $process.Start() | Out-Null
+            $woleOutput = $process.StandardOutput.ReadToEnd()
+            $woleError = $process.StandardError.ReadToEnd()
+            $process.WaitForExit(5000) | Out-Null
+            
+            if ($process.ExitCode -eq 0) {
                 $woleWorks = $true
             }
         } catch {
-            $woleWorks = $false
+            $woleError = $_.Exception.Message
         }
         
         if ($woleWorks) {
             Write-Host "✓ wole is ready to use!" -ForegroundColor Green
+            if ($woleOutput) {
+                Write-Host "  Version: $($woleOutput.Trim())" -ForegroundColor Gray
+            }
             Write-Host ""
-            Write-Host "Run 'wole --help' to get started." -ForegroundColor Cyan
+            Write-Host "Quick start:" -ForegroundColor Cyan
+            Write-Host "  wole scan     - Scan for cleanable files" -ForegroundColor White
+            Write-Host "  wole clean    - Clean files interactively" -ForegroundColor White
+            Write-Host "  wole status   - Show system status" -ForegroundColor White
             Write-Host ""
-            # Show a quick demo
-            Write-Host "Quick start:" -ForegroundColor White
-            Write-Host "  wole scan     - Scan for cleanable files" -ForegroundColor Gray
-            Write-Host "  wole clean    - Clean files interactively" -ForegroundColor Gray
-            Write-Host "  wole status   - Show system status" -ForegroundColor Gray
+            Write-Host "Run 'wole --help' for all commands." -ForegroundColor Gray
         } else {
-            Write-Host "✓ PATH updated for future terminal sessions" -ForegroundColor Green
+            Write-Host "⚠ wole installed but may have issues running" -ForegroundColor Yellow
+            if ($woleError) {
+                Write-Host "  Error: $woleError" -ForegroundColor Red
+            }
             Write-Host ""
-            Write-Host "To use wole now, either:" -ForegroundColor Yellow
-            Write-Host "  1. Open a NEW terminal window, then run: wole --help" -ForegroundColor White
-            Write-Host "  2. Or run directly: & `"$TARGET_PATH`" --help" -ForegroundColor White
+            Write-Host "Try running directly:" -ForegroundColor Yellow
+            Write-Host "  & `"$TARGET_PATH`" --help" -ForegroundColor White
+            Write-Host ""
+            Write-Host "If that fails, possible causes:" -ForegroundColor Gray
+            Write-Host "  - Missing Visual C++ Runtime (install from microsoft.com)" -ForegroundColor Gray
+            Write-Host "  - Windows Defender blocking (check Security settings)" -ForegroundColor Gray
+            Write-Host "  - Wrong architecture (ARM vs x64)" -ForegroundColor Gray
         }
     } else {
-        Write-Host "✗ Installation may have failed - executable not found" -ForegroundColor Red
+        Write-Host "✗ Installation failed - executable not found at $TARGET_PATH" -ForegroundColor Red
     }
     
 } finally {
