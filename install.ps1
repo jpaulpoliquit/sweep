@@ -213,11 +213,15 @@ try {
     # Verify installation
     $exeExists = Test-Path $TARGET_PATH
     $pathContainsDir = $env:Path -split ';' | Where-Object { 
+        $entry = $_
+        if ([string]::IsNullOrWhiteSpace($entry)) {
+            return $false
+        }
         try {
-            $normalized = [System.IO.Path]::GetFullPath($_.Trim()).TrimEnd('\', '/')
+            $normalized = [System.IO.Path]::GetFullPath($entry.Trim()).TrimEnd('\', '/')
             $normalized -eq $INSTALL_DIR_NORMALIZED
         } catch {
-            $_.Trim().TrimEnd('\', '/') -eq $INSTALL_DIR_NORMALIZED
+            $entry.Trim().TrimEnd('\', '/') -eq $INSTALL_DIR_NORMALIZED
         }
     } | Select-Object -First 1
     
