@@ -191,7 +191,7 @@ pub fn scan(_root: &Path, config: &Config, output_mode: OutputMode) -> Result<Ca
         let size_bytes: u64 = apps_with_sizes.iter().map(|(_, size)| *size).sum();
         let items = apps_with_sizes.len();
 
-        let mut result = CategoryResult {
+        let result = CategoryResult {
             paths,
             size_bytes,
             items,
