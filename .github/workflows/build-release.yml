@@ -129,7 +129,6 @@ jobs:
         run: |
           if ("${{ matrix.target }}" -eq "i686-pc-windows-msvc") {
             # Disable battery feature for i686 builds due to unaligned reference issues in battery 0.7.x
-            # Battery 0.8+ should fix this, but keeping this as fallback
             cargo build --release --target ${{ matrix.target }} --no-default-features --verbose
           } else {
             cargo build --release --target ${{ matrix.target }} --verbose
