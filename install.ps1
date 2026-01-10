@@ -212,24 +212,41 @@ try {
     
     # Verify installation
     $exeExists = Test-Path $TARGET_PATH
-    $pathContainsDir = $env:Path -split ';' | Where-Object { 
-        $entry = $_
-        if ($null -eq $entry -or -not ($entry -is [string]) -or [string]::IsNullOrWhiteSpace($entry)) {
-            return $false
-        }
-        try {
-            $trimmedEntry = $entry.Trim()
-            $normalized = [System.IO.Path]::GetFullPath($trimmedEntry).TrimEnd('\', '/')
-            $normalized -eq $INSTALL_DIR_NORMALIZED
-        } catch {
+    $pathContainsDir = $null
+    try {
+        $pathEntries = $env:Path -split ';'
+        foreach ($pathEntry in $pathEntries) {
+            # Convert to string and validate
+            $entryStr = [string]$pathEntry
+            if ([string]::IsNullOrWhiteSpace($entryStr)) {
+                continue
+            }
+            
             try {
-                $trimmedEntry = $entry.Trim()
-                $trimmedEntry.TrimEnd('\', '/') -eq $INSTALL_DIR_NORMALIZED
+                $trimmedEntry = $entryStr.Trim()
+                $normalized = [System.IO.Path]::GetFullPath($trimmedEntry).TrimEnd('\', '/')
+                if ($normalized -eq $INSTALL_DIR_NORMALIZED) {
+                    $pathContainsDir = $true
+                    break
+                }
             } catch {
-                $false
+                # If GetFullPath fails, try simple string comparison
+                try {
+                    $trimmedEntry = $entryStr.Trim().TrimEnd('\', '/')
+                    if ($trimmedEntry -eq $INSTALL_DIR_NORMALIZED) {
+                        $pathContainsDir = $true
+                        break
+                    }
+                } catch {
+                    # Skip this entry if we can't process it
+                    continue
+                }
             }
         }
-    } | Select-Object -First 1
+    } catch {
+        # If verification fails, assume not in path
+        $pathContainsDir = $null
+    }
     
     Write-Host ""
     if ($exeExists) {
