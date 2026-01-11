@@ -563,8 +563,12 @@ fn render_file_list(f: &mut Frame, area: Rect, app_state: &mut AppState) {
                 };
                 let size_str = bytesize::to_string(item.size_bytes, true);
 
+                // Add emoji based on file type
+                let file_type = crate::utils::detect_file_type(&item.path);
+                let emoji = file_type.emoji();
+
                 // Truncate path if needed - more conservative calculation to give more room
-                let fixed = indent.len() + 3 /*prefix+spaces*/ + 3 /*checkbox*/ + 1 /*space*/ + 2 /*two spaces before size*/ + 8 + 2 /*extra padding*/;
+                let fixed = indent.len() + 3 /*prefix+spaces*/ + 3 /*checkbox*/ + 1 /*space*/ + 3 /*emoji + space*/ + 2 /*two spaces before size*/ + 8 + 2 /*extra padding*/;
                 let max_len = (inner.width as usize).saturating_sub(fixed).max(10);
                 let path_display = if path_str.len() > max_len {
                     format!(
@@ -579,6 +583,7 @@ fn render_file_list(f: &mut Frame, area: Rect, app_state: &mut AppState) {
                     Span::styled(format!("{}{} ", indent, prefix), row_style),
                     Span::styled(checkbox, checkbox_style),
                     Span::raw(" "),
+                    Span::styled(format!("{} ", emoji), Styles::secondary()),
                     Span::styled(path_display, Styles::primary()),
                     Span::styled(format!("  {:>8}", size_str), Styles::secondary()),
                 ]));

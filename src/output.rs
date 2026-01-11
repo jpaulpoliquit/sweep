@@ -182,7 +182,9 @@ pub fn print_human_with_options(
                             bytesize::to_string(group.size, true)
                         );
                         for path in &group.paths {
-                            println!("     {}", Theme::muted(&path.display().to_string()));
+                            let file_type = crate::utils::detect_file_type(path);
+                            let emoji = file_type.emoji();
+                            println!("     {} {}", emoji, Theme::muted(&path.display().to_string()));
                         }
                     }
 
@@ -198,7 +200,9 @@ pub fn print_human_with_options(
                     if mode == OutputMode::Verbose && !result.paths.is_empty() {
                         let show_count = std::cmp::min(3, result.paths.len());
                         for path in result.paths.iter().take(show_count) {
-                            println!("  {}", Theme::muted(&path.display().to_string()));
+                            let file_type = crate::utils::detect_file_type(path);
+                            let emoji = file_type.emoji();
+                            println!("  {} {}", emoji, Theme::muted(&path.display().to_string()));
                         }
                         if result.paths.len() > show_count {
                             println!(
@@ -209,7 +213,9 @@ pub fn print_human_with_options(
                         }
                     } else if mode == OutputMode::VeryVerbose {
                         for path in &result.paths {
-                            println!("  {}", Theme::muted(&path.display().to_string()));
+                            let file_type = crate::utils::detect_file_type(path);
+                            let emoji = file_type.emoji();
+                            println!("  {} {}", emoji, Theme::muted(&path.display().to_string()));
                         }
                     }
                 }
@@ -219,7 +225,9 @@ pub fn print_human_with_options(
                 if mode == OutputMode::Verbose && !result.paths.is_empty() {
                     let show_count = std::cmp::min(3, result.paths.len());
                     for path in result.paths.iter().take(show_count) {
-                        println!("  {}", Theme::muted(&path.display().to_string()));
+                        let file_type = crate::utils::detect_file_type(path);
+                        let emoji = file_type.emoji();
+                        println!("  {} {}", emoji, Theme::muted(&path.display().to_string()));
                     }
                     if result.paths.len() > show_count {
                         println!(
@@ -233,7 +241,9 @@ pub fn print_human_with_options(
                 // In very verbose mode, show all paths
                 if mode == OutputMode::VeryVerbose {
                     for path in &result.paths {
-                        println!("  {}", Theme::muted(&path.display().to_string()));
+                        let file_type = crate::utils::detect_file_type(path);
+                        let emoji = file_type.emoji();
+                        println!("  {} {}", emoji, Theme::muted(&path.display().to_string()));
                     }
                 }
             }
@@ -676,7 +686,9 @@ pub fn print_analyze(results: &ScanResults, mode: OutputMode) {
                         bytesize::to_string(group.size, true)
                     );
                     for path in &group.paths {
-                        println!("     {}", Theme::muted(&path.display().to_string()));
+                        let file_type = crate::utils::detect_file_type(path);
+                        let emoji = file_type.emoji();
+                        println!("     {} {}", emoji, Theme::muted(&path.display().to_string()));
                     }
                 }
 
@@ -692,7 +704,9 @@ pub fn print_analyze(results: &ScanResults, mode: OutputMode) {
                 if mode == OutputMode::Verbose && !result.paths.is_empty() {
                     let show_count = std::cmp::min(3, result.paths.len());
                     for path in result.paths.iter().take(show_count) {
-                        println!("  {}", Theme::muted(&path.display().to_string()));
+                        let file_type = crate::utils::detect_file_type(path);
+                        let emoji = file_type.emoji();
+                        println!("  {} {}", emoji, Theme::muted(&path.display().to_string()));
                     }
                     if result.paths.len() > show_count {
                         println!(
@@ -703,7 +717,9 @@ pub fn print_analyze(results: &ScanResults, mode: OutputMode) {
                     }
                 } else if mode == OutputMode::VeryVerbose {
                     for path in &result.paths {
-                        println!("  {}", Theme::muted(&path.display().to_string()));
+                        let file_type = crate::utils::detect_file_type(path);
+                        let emoji = file_type.emoji();
+                        println!("  {} {}", emoji, Theme::muted(&path.display().to_string()));
                     }
                 }
             }
@@ -717,7 +733,9 @@ pub fn print_analyze(results: &ScanResults, mode: OutputMode) {
                 result.paths.len()
             };
             for path in result.paths.iter().take(show_count) {
-                println!("  {}", Theme::muted(&path.display().to_string()));
+                let file_type = crate::utils::detect_file_type(path);
+                let emoji = file_type.emoji();
+                println!("  {} {}", emoji, Theme::muted(&path.display().to_string()));
             }
             if result.paths.len() > show_count && mode == OutputMode::Verbose {
                 println!(

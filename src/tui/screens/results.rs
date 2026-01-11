@@ -8,6 +8,7 @@ use crate::tui::{
         shortcuts::{get_shortcuts, render_shortcuts},
     },
 };
+use crate::utils::detect_file_type;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
@@ -356,10 +357,14 @@ fn render_grouped_results(f: &mut Frame, area: Rect, app_state: &mut AppState) {
                         } else {
                             "  "
                         };
+                        // Add emoji based on file type
+                        let file_type = detect_file_type(&item.path);
+                        let emoji = file_type.emoji();
                         lines.push(Line::from(vec![
                             Span::styled(indent, Style::default()),
                             Span::styled(checkbox, checkbox_style),
                             Span::styled(" ", Style::default()),
+                            Span::styled(format!("{} ", emoji), Styles::secondary()),
                             Span::styled(display_str, Styles::primary()),
                             Span::styled(format!("  {:>8}", size_str), Styles::secondary()),
                             if let Some(ago) = ago_str {
@@ -627,10 +632,15 @@ fn render_grouped_results(f: &mut Frame, area: Rect, app_state: &mut AppState) {
                     None
                 };
 
+                // Add emoji based on file type
+                let file_type = detect_file_type(&item.path);
+                let emoji = file_type.emoji();
+                
                 let fixed = indent.len()
                     + 3 /*prefix+spaces*/
                     + 3 /*checkbox*/
                     + 1 /*space*/
+                    + 3 /*emoji + space*/
                     + 2 /*two spaces before size*/
                     + 8 /*size*/
                     + if ago_str.is_some() { 3 /*" | "*/ + 8 /*ago*/ } else { 0 };
@@ -648,6 +658,7 @@ fn render_grouped_results(f: &mut Frame, area: Rect, app_state: &mut AppState) {
                     Span::styled(format!("{}{} ", indent, prefix), row_style),
                     Span::styled(checkbox, apply_sel(checkbox_style)),
                     Span::styled(" ", row_style),
+                    Span::styled(format!("{} ", emoji), apply_sel(Styles::secondary())),
                     Span::styled(path_display, path_style),
                     Span::styled(format!("  {:>8}", size_str), apply_sel(Styles::secondary())),
                     if let Some(ago) = ago_str {

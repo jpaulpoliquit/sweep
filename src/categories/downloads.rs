@@ -128,9 +128,12 @@ pub fn scan(
         for (i, (path, size)) in files_with_sizes.iter().take(show_count).enumerate() {
             let size_str = bytesize::to_string(*size, true);
             let file_name = path.file_name().and_then(|n| n.to_str()).unwrap_or("");
+            let file_type = crate::utils::detect_file_type(path);
+            let emoji = file_type.emoji();
             println!(
-                "      {} {} ({})",
+                "      {} {} {} ({})",
                 Theme::muted("→"),
+                emoji,
                 file_name,
                 Theme::size(&size_str)
             );
