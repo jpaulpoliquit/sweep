@@ -53,7 +53,8 @@ fn fun_comparison(bytes: u64) -> Option<String> {
         } else {
             Some(format!(
                 "That's like ~{:.1} hours of HD video (~{:.1} GB)!",
-                bytes as f64 / hd_video_hour as f64, gb
+                bytes as f64 / hd_video_hour as f64,
+                gb
             ))
         }
     } else if bytes >= 10 * MB {
@@ -577,31 +578,33 @@ fn render_file_list(f: &mut Frame, area: Rect, app_state: &mut AppState) {
                 // Calculate fixed widths for metadata columns (same as results screen)
                 // Size column: 2 spaces + 8 chars (e.g., "793.7 MiB")
                 let metadata_width = 2 + 8;
-                
+
                 let fixed_prefix = indent.len()
                     + 3 /*prefix+spaces*/
                     + 3 /*checkbox*/
                     + 1 /*space*/
                     + 3 /*emoji + space*/;
-                
+
                 // Calculate available width for file name - better alignment, not too far right
                 let min_name_width = 8; // Minimum for readability
                 let max_name_width = (inner.width as usize)
                     .saturating_sub(fixed_prefix)
                     .saturating_sub(metadata_width);
-                
+
                 let name_column_width = max_name_width.max(min_name_width);
-                
+
                 // Truncate file name if needed, pad to ensure metadata alignment
                 let path_display = if path_str.len() > name_column_width {
                     format!(
                         "...{}",
-                        &path_str[path_str.len().saturating_sub(name_column_width.saturating_sub(3))..]
+                        &path_str[path_str
+                            .len()
+                            .saturating_sub(name_column_width.saturating_sub(3))..]
                     )
                 } else {
                     path_str.clone()
                 };
-                
+
                 let padding_needed = name_column_width.saturating_sub(path_display.chars().count());
                 let path_display_padded = format!("{}{}", path_display, " ".repeat(padding_needed));
 

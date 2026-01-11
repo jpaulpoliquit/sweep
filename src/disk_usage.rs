@@ -88,10 +88,12 @@ pub fn scan_directory_with_progress(
     progress_callback: Option<ProgressCallback>,
 ) -> Result<DiskInsights> {
     // Check cache first
-    if let Ok(Some(cached_insights)) = crate::disk_usage_cache::load_cached_insights(path, max_depth) {
+    if let Ok(Some(cached_insights)) =
+        crate::disk_usage_cache::load_cached_insights(path, max_depth)
+    {
         return Ok(cached_insights);
     }
-    
+
     let start_time = Instant::now();
 
     // First pass: collect all files and their sizes, grouped by directory
@@ -164,7 +166,7 @@ pub fn scan_directory_with_progress(
                         if let Some(ref callback) = progress_callback {
                             callback(&entry_path);
                         }
-                        
+
                         if let Ok(meta) = e.metadata() {
                             let size = meta.len();
                             total_size.fetch_add(size, Ordering::Relaxed);
@@ -260,10 +262,10 @@ pub fn scan_directory_with_progress(
         largest_files,
         scan_duration: start_time.elapsed(),
     };
-    
+
     // Save to cache (ignore errors - cache is optional)
     let _ = crate::disk_usage_cache::save_cached_insights(path, max_depth, &insights);
-    
+
     Ok(insights)
 }
 

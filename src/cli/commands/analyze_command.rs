@@ -9,6 +9,7 @@ use crate::scanner;
 use crate::size;
 use std::path::PathBuf;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_analyze(
     disk: bool,
     entire_disk: bool,
@@ -132,6 +133,7 @@ pub(crate) fn handle_analyze(
                 current_path: scan_path.clone(),
                 cursor: 0,
                 sort_by,
+                selected_paths: std::collections::HashSet::new(),
             };
             tui::run(Some(app_state))?;
         } else {

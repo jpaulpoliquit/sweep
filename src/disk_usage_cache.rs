@@ -52,27 +52,27 @@ pub fn get_cache_key(path: &Path, depth: u8) -> Result<(String, u64)> {
     // Get root directory mtime for cache invalidation
     let metadata = fs::metadata(path)
         .with_context(|| format!("Failed to get metadata for: {}", path.display()))?;
-    
+
     let mtime = metadata
         .modified()
         .or_else(|_| metadata.created())
-        .unwrap_or_else(|_| SystemTime::UNIX_EPOCH);
-    
+        .unwrap_or(SystemTime::UNIX_EPOCH);
+
     let mtime_secs = mtime
         .duration_since(SystemTime::UNIX_EPOCH)
         .unwrap_or_default()
         .as_secs();
-    
+
     let normalized_path = normalize_path_for_cache(path);
     let key = format!("{}_{}_{}", normalized_path, depth, mtime_secs);
-    
+
     // Use a hash of the key for filename (to avoid filesystem issues with long paths)
     use std::collections::hash_map::DefaultHasher;
     use std::hash::{Hash, Hasher};
     let mut hasher = DefaultHasher::new();
     key.hash(&mut hasher);
     let hash = format!("{:x}", hasher.finish());
-    
+
     Ok((hash, mtime_secs))
 }
 
@@ -80,29 +80,29 @@ pub fn get_cache_key(path: &Path, depth: u8) -> Result<(String, u64)> {
 pub fn load_cached_insights(path: &Path, depth: u8) -> Result<Option<DiskInsights>> {
     // Get current mtime first to generate cache key
     let (cache_key_hash, _) = get_cache_key(path, depth)?;
-    
+
     let cache_dir = get_cache_dir()?;
     let cache_file = cache_dir.join(format!("{}.json", cache_key_hash));
-    
+
     if !cache_file.exists() {
         return Ok(None);
     }
-    
+
     // Read cache file
     let cache_data = fs::read_to_string(&cache_file)
         .with_context(|| format!("Failed to read cache file: {}", cache_file.display()))?;
-    
+
     // Parse JSON
     let insights: DiskInsights = serde_json::from_str(&cache_data)
         .with_context(|| format!("Failed to parse cache file: {}", cache_file.display()))?;
-    
+
     // Verify the cached path matches (safety check)
     if insights.root.path != path {
         // Path mismatch, invalidate cache
         let _ = fs::remove_file(&cache_file);
         return Ok(None);
     }
-    
+
     // Verify mtime hasn't changed by regenerating key with current mtime
     // If the hash matches, mtime is the same (since hash includes mtime)
     let (current_key_hash, _) = get_cache_key(path, depth)?;
@@ -111,7 +111,7 @@ pub fn load_cached_insights(path: &Path, depth: u8) -> Result<Option<DiskInsight
         let _ = fs::remove_file(&cache_file);
         return Ok(None);
     }
-    
+
     Ok(Some(insights))
 }
 
@@ -120,34 +120,35 @@ pub fn save_cached_insights(path: &Path, depth: u8, insights: &DiskInsights) -> 
     let (cache_key_hash, _) = get_cache_key(path, depth)?;
     let cache_dir = get_cache_dir()?;
     let cache_file = cache_dir.join(format!("{}.json", cache_key_hash));
-    
+
     // Serialize to JSON
     let json_data = serde_json::to_string_pretty(insights)
         .context("Failed to serialize disk insights to JSON")?;
-    
+
     // Write to cache file atomically (write to temp file, then rename)
     let temp_file = cache_file.with_extension("tmp");
     fs::write(&temp_file, json_data)
         .with_context(|| format!("Failed to write cache file: {}", temp_file.display()))?;
-    
+
     fs::rename(&temp_file, &cache_file)
         .with_context(|| format!("Failed to rename cache file: {}", cache_file.display()))?;
-    
+
     Ok(())
 }
 
 /// Invalidate cache for a specific path (optional cleanup)
+#[allow(dead_code)]
 pub fn invalidate_cache(path: &Path) -> Result<()> {
     let cache_dir = get_cache_dir()?;
-    
+
     // Find all cache files that match this path (by checking normalized path prefix)
     let normalized_path = normalize_path_for_cache(path);
-    
+
     if cache_dir.exists() {
         for entry in fs::read_dir(&cache_dir)? {
             let entry = entry?;
             let file_path = entry.path();
-            
+
             // Try to read and check if it matches
             if let Ok(cache_data) = fs::read_to_string(&file_path) {
                 if let Ok(insights) = serde_json::from_str::<DiskInsights>(&cache_data) {
@@ -159,6 +160,6 @@ pub fn invalidate_cache(path: &Path) -> Result<()> {
             }
         }
     }
-    
+
     Ok(())
 }

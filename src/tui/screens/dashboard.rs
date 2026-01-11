@@ -176,18 +176,15 @@ fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bo
     // Helper function to determine which group a category belongs to
     fn get_category_group(cat_name: &str) -> Option<&'static str> {
         match cat_name {
-            "Trash" | "Temp Files" | "Browser Cache" | "Application Cache" | "System Cache" | "Empty Folders" => {
-                Some("A. Quick Clean (recommended)")
-            }
-            "Build Artifacts" | "Package Cache" => {
-                Some("B. Developer Cleanup")
-            }
-            "Installed Applications" | "Old Downloads" | "Large Files" | "Old Files" | "Duplicates" => {
-                Some("C. Space Hunters (review required)")
-            }
-            "Windows Update" | "Event Logs" => {
-                Some("D. Advanced (admin required)")
-            }
+            "Trash" | "Temp Files" | "Browser Cache" | "Application Cache" | "System Cache"
+            | "Empty Folders" => Some("A. Quick Clean (recommended)"),
+            "Build Artifacts" | "Package Cache" => Some("B. Developer Cleanup"),
+            "Installed Applications"
+            | "Old Downloads"
+            | "Large Files"
+            | "Old Files"
+            | "Duplicates" => Some("C. Space Hunters (review required)"),
+            "Windows Update" | "Event Logs" => Some("D. Advanced (admin required)"),
             _ => None,
         }
     }
@@ -203,9 +200,10 @@ fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bo
         if group != current_group {
             if let Some(group_name) = group {
                 // Add group header
-                items.push(ListItem::new(Line::from(vec![
-                    Span::styled(format!("  {}", group_name), Styles::header()),
-                ])));
+                items.push(ListItem::new(Line::from(vec![Span::styled(
+                    format!("  {}", group_name),
+                    Styles::header(),
+                )])));
             }
             current_group = group;
         }
@@ -247,8 +245,7 @@ fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bo
         };
 
         // Make description less prominent than the category name
-        // Use default style (no modifiers) to ensure it's less vibrant than the name
-        let desc_style = Style::default();
+        let desc_style = Styles::secondary();
 
         let line = Line::from(vec![
             Span::styled(prefix, name_style),

@@ -5,6 +5,8 @@ use anyhow::Result;
 use std::collections::HashSet;
 use std::path::PathBuf;
 
+pub type RecordSignatureFn = dyn Fn(&FileSignature, &str) -> Result<()> + Send + Sync;
+
 /// Context passed to category scanners for incremental scanning
 ///
 /// Provides:
@@ -16,7 +18,7 @@ pub struct CacheContext {
     /// New/modified files that need scanning
     pub files_to_scan: Vec<PathBuf>,
     /// Callback to record file signatures after scanning
-    pub record_signature: Box<dyn Fn(&FileSignature, &str) -> Result<()> + Send + Sync>,
+    pub record_signature: Box<RecordSignatureFn>,
 }
 
 impl CacheContext {
@@ -24,7 +26,7 @@ impl CacheContext {
     pub fn new(
         unchanged_paths: HashSet<PathBuf>,
         files_to_scan: Vec<PathBuf>,
-        record_signature: Box<dyn Fn(&FileSignature, &str) -> Result<()> + Send + Sync>,
+        record_signature: Box<RecordSignatureFn>,
     ) -> Self {
         Self {
             unchanged_paths,
@@ -48,7 +50,7 @@ impl CacheContext {
 pub struct CacheContextBuilder {
     unchanged_paths: HashSet<PathBuf>,
     files_to_scan: Vec<PathBuf>,
-    record_signature: Option<Box<dyn Fn(&FileSignature, &str) -> Result<()> + Send + Sync>>,
+    record_signature: Option<Box<RecordSignatureFn>>,
 }
 
 impl CacheContextBuilder {
@@ -70,10 +72,7 @@ impl CacheContextBuilder {
         self
     }
 
-    pub fn with_record_fn(
-        mut self,
-        f: Box<dyn Fn(&FileSignature, &str) -> Result<()> + Send + Sync>,
-    ) -> Self {
+    pub fn with_record_fn(mut self, f: Box<RecordSignatureFn>) -> Self {
         self.record_signature = Some(f);
         self
     }

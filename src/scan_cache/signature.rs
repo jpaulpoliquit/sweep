@@ -67,7 +67,7 @@ impl FileSignature {
         let file_size = metadata.len();
 
         // Use memory mapping for large files
-        if file_size >= MEMMAP_THRESHOLD && file_size > 0 {
+        if file_size >= MEMMAP_THRESHOLD {
             let file = File::open(path)
                 .with_context(|| format!("Failed to open file: {}", path.display()))?;
 

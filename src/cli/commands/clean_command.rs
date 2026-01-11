@@ -47,6 +47,7 @@ fn get_disk_space_for_path(path: &Path) -> Option<(u64, u64)> {
     best.map(|(_, total, avail)| (total, avail))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_clean(
     all: bool,
     cache: bool,
@@ -214,25 +215,23 @@ pub(crate) fn handle_clean(
                 );
                 println!();
             }
+        } else if json {
+            eprintln!("First scan: building cache from category scans (fast baseline).");
         } else {
-            if json {
-                eprintln!("First scan: building cache from category scans (fast baseline).");
-            } else {
-                println!();
-                println!(
-                    "{}",
-                    crate::theme::Theme::warning(
-                        "First scan: building cache from category scans (fast baseline)."
-                    )
-                );
-                println!(
-                    "{}",
-                    crate::theme::Theme::muted(
-                        "Tip: enable deep baseline via config: cache.full_disk_baseline = true"
-                    )
-                );
-                println!();
-            }
+            println!();
+            println!(
+                "{}",
+                crate::theme::Theme::warning(
+                    "First scan: building cache from category scans (fast baseline)."
+                )
+            );
+            println!(
+                "{}",
+                crate::theme::Theme::muted(
+                    "Tip: enable deep baseline via config: cache.full_disk_baseline = true"
+                )
+            );
+            println!();
         }
     }
 

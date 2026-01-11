@@ -1876,7 +1876,7 @@ fn handle_confirm_event(
                         if group.folder_groups.is_empty() {
                             return EventResult::Continue;
                         }
-                        
+
                         // Build folder hierarchy to find children
                         let scan_path = &app_state.scan_path;
                         let hierarchy = crate::tui::state::build_folder_hierarchy(
@@ -1884,7 +1884,7 @@ fn handle_confirm_event(
                             &group.name,
                             &group.folder_groups,
                         );
-                        
+
                         // Recursively collect items from this folder and all its children
                         fn collect_subtree_items(
                             folder_idx: usize,
@@ -1897,8 +1897,9 @@ fn handle_confirm_event(
                             }
                             items
                         }
-                        
-                        let folder_items = collect_subtree_items(folder_idx, group, &hierarchy.children);
+
+                        let folder_items =
+                            collect_subtree_items(folder_idx, group, &hierarchy.children);
                         app_state.toggle_items(folder_items);
                     }
                 }
@@ -2331,6 +2332,7 @@ fn handle_disk_insights_event(
         ref mut current_path,
         ref mut cursor,
         ref mut sort_by,
+        ref mut selected_paths,
     } = app_state.screen
     {
         // Get current folder node
@@ -2421,18 +2423,14 @@ fn handle_disk_insights_event(
                 EventResult::Continue
             }
             KeyCode::Esc => {
-                // If there's an active search filter, clear it; otherwise go back to Results or Dashboard
+                // If there's an active search filter, clear it; otherwise go back to Dashboard
                 if !app_state.search_query.is_empty() {
                     app_state.search_query.clear();
                     *cursor = 0;
                     EventResult::Continue
                 } else {
-                    // Go back to Results if there are scan results, otherwise Dashboard
-                    if !app_state.all_items.is_empty() || !app_state.category_groups.is_empty() {
-                        app_state.screen = crate::tui::state::Screen::Results;
-                    } else {
-                        app_state.screen = crate::tui::state::Screen::Dashboard;
-                    }
+                    // Go back to Dashboard (not Results)
+                    app_state.screen = crate::tui::state::Screen::Dashboard;
                     app_state.search_query.clear();
                     EventResult::Continue
                 }
@@ -2443,39 +2441,24 @@ fn handle_disk_insights_event(
                 EventResult::Continue
             }
             KeyCode::Backspace => {
-                // If there's an active search filter, clear it; otherwise navigate back to parent or Results
+                // If there's an active search filter, clear it; otherwise navigate back to parent
                 if !app_state.search_query.is_empty() {
                     app_state.search_query.clear();
                     *cursor = 0;
                 } else {
-                    // Navigate back to parent if not at root
-                    if let Some(parent) = current_path.parent() {
-                        if parent != insights.root.path.as_path()
-                            && parent.starts_with(insights.root.path.as_path())
-                        {
-                            *current_path = parent.to_path_buf();
-                            *cursor = 0;
-                        } else {
-                            // At root, go back to Results if there are scan results, otherwise Dashboard
-                            if !app_state.all_items.is_empty()
-                                || !app_state.category_groups.is_empty()
-                            {
-                                app_state.screen = crate::tui::state::Screen::Results;
-                            } else {
-                                app_state.screen = crate::tui::state::Screen::Dashboard;
+                    let root = insights.root.path.as_path();
+
+                    // Navigate back to parent if we're not at the root.
+                    // This includes navigating from a direct child back to the root.
+                    if current_path.as_path() != root {
+                        if let Some(parent) = current_path.parent() {
+                            if parent.starts_with(root) {
+                                *current_path = parent.to_path_buf();
+                                *cursor = 0;
                             }
-                            app_state.search_query.clear();
                         }
-                    } else {
-                        // At root, go back to Results if there are scan results, otherwise Dashboard
-                        if !app_state.all_items.is_empty() || !app_state.category_groups.is_empty()
-                        {
-                            app_state.screen = crate::tui::state::Screen::Results;
-                        } else {
-                            app_state.screen = crate::tui::state::Screen::Dashboard;
-                        }
-                        app_state.search_query.clear();
                     }
+                    // If already at root, stay on DiskInsights screen (do nothing)
                 }
                 EventResult::Continue
             }
@@ -2535,6 +2518,30 @@ fn handle_disk_insights_event(
             KeyCode::Char('l') | KeyCode::Char('L') => {
                 // Show largest files (could open a modal or switch view)
                 // For now, just continue - could be enhanced later
+                EventResult::Continue
+            }
+            KeyCode::Char(' ') => {
+                // Toggle selection of current item
+                if *cursor < children_count {
+                    // Selected item is a folder
+                    let selected_child = &children[*cursor];
+                    if selected_paths.contains(&selected_child.path) {
+                        selected_paths.remove(&selected_child.path);
+                    } else {
+                        selected_paths.insert(selected_child.path.clone());
+                    }
+                } else {
+                    // Selected item is a file
+                    let file_index = *cursor - children_count;
+                    if file_index < files.len() {
+                        let selected_file = &files[file_index];
+                        if selected_paths.contains(&selected_file.path) {
+                            selected_paths.remove(&selected_file.path);
+                        } else {
+                            selected_paths.insert(selected_file.path.clone());
+                        }
+                    }
+                }
                 EventResult::Continue
             }
             _ => EventResult::Continue,
@@ -2828,7 +2835,7 @@ fn handle_status_event(
             KeyCode::Char('r') | KeyCode::Char('R') => {
                 // Refresh status (use async to avoid blocking UI)
                 use crate::status::gather_status_async;
-                
+
                 // Clear any existing receiver and start new refresh
                 *status_receiver = None;
                 let (tx, rx) = std::sync::mpsc::channel();

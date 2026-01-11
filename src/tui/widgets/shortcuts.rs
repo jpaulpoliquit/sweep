@@ -159,6 +159,7 @@ pub fn get_shortcuts(
                 .unwrap_or(false)
             {
                 vec![
+                    ("Space", "Select"),
                     ("↑↓", "Navigate"),
                     ("Enter", "Drill In"),
                     ("Backspace", "Go Back"),
@@ -169,6 +170,7 @@ pub fn get_shortcuts(
                 ]
             } else {
                 vec![
+                    ("Space", "Select"),
                     ("↑↓", "Navigate"),
                     ("Enter", "Drill In"),
                     ("Backspace", "Go Back"),

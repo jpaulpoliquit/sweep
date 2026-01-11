@@ -120,6 +120,7 @@ pub enum Screen {
         current_path: PathBuf,
         cursor: usize,
         sort_by: crate::disk_usage::SortBy,
+        selected_paths: std::collections::HashSet<PathBuf>,
     },
     Optimize {
         cursor: usize,
@@ -131,7 +132,8 @@ pub enum Screen {
     Status {
         status: Box<crate::status::SystemStatus>,
         last_refresh: std::time::Instant,
-        status_receiver: Option<std::sync::mpsc::Receiver<anyhow::Result<crate::status::SystemStatus>>>,
+        status_receiver:
+            Option<std::sync::mpsc::Receiver<anyhow::Result<crate::status::SystemStatus>>>,
     },
 }
 
@@ -162,9 +164,7 @@ impl Clone for Screen {
                 errors: *errors,
                 failed_temp_files: failed_temp_files.clone(),
             },
-            Screen::RestoreSelection { cursor } => Screen::RestoreSelection {
-                cursor: *cursor,
-            },
+            Screen::RestoreSelection { cursor } => Screen::RestoreSelection { cursor: *cursor },
             Screen::Restore {
                 progress,
                 result,
@@ -179,11 +179,13 @@ impl Clone for Screen {
                 current_path,
                 cursor,
                 sort_by,
+                selected_paths,
             } => Screen::DiskInsights {
                 insights: insights.clone(),
                 current_path: current_path.clone(),
                 cursor: *cursor,
                 sort_by: *sort_by,
+                selected_paths: selected_paths.clone(),
             },
             Screen::Optimize {
                 cursor,
@@ -622,16 +624,26 @@ impl AppState {
 
         // Expected Quick Clean categories that should be enabled by default
         let expected_quick_clean: std::collections::HashSet<String> = [
-            "trash", "temp_files", "browser_cache", "application_cache", 
-            "system_cache", "empty_folders", "build_artifacts"
-        ].iter().map(|s| s.to_string()).collect();
-        
+            "trash",
+            "temp_files",
+            "browser_cache",
+            "application_cache",
+            "system_cache",
+            "empty_folders",
+            "build_artifacts",
+        ]
+        .iter()
+        .map(|s| s.to_string())
+        .collect();
+
         // Check if config has all expected Quick Clean categories (indicates complete config)
-        let config_is_complete = !config_enabled.is_empty() && 
-            expected_quick_clean.iter().all(|cat| config_enabled.contains(cat));
+        let config_is_complete = !config_enabled.is_empty()
+            && expected_quick_clean
+                .iter()
+                .all(|cat| config_enabled.contains(cat));
 
         // Use central CATEGORIES constant as single source of truth
-        // Strategy: 
+        // Strategy:
         // - If config is empty OR incomplete (missing Quick Clean categories), use hardcoded defaults
         // - If config is complete, use config values (user has customized)
         let use_config = config_is_complete;
@@ -1713,11 +1725,7 @@ impl AppState {
 
             if is_extension {
                 // Extract extension (remove leading dot if present)
-                let ext = if type_str.starts_with('.') {
-                    type_str[1..].to_string()
-                } else {
-                    type_str.clone()
-                };
+                let ext = type_str.strip_prefix('.').unwrap_or(&type_str).to_string();
                 return (None, Some(ext), text_query);
             } else {
                 // Try to match as file type category
@@ -1768,11 +1776,7 @@ impl AppState {
                     ));
 
             if is_extension {
-                let ext = if type_str.starts_with('.') {
-                    type_str[1..].to_string()
-                } else {
-                    type_str.clone()
-                };
+                let ext = type_str.strip_prefix('.').unwrap_or(&type_str).to_string();
                 return (None, Some(ext), text_query);
             } else {
                 let file_type = self.match_file_type_string(&type_str);
@@ -1791,8 +1795,7 @@ impl AppState {
         let type_lower = type_str.to_lowercase();
 
         // If it starts with ., definitely treat as extension
-        if type_lower.starts_with('.') {
-            let ext = &type_lower[1..];
+        if let Some(ext) = type_lower.strip_prefix('.') {
             let test_path_str = format!("file.{}", ext);
             let test_path = std::path::Path::new(&test_path_str);
             let detected_type = crate::utils::detect_file_type(test_path);
@@ -2912,51 +2915,54 @@ impl AppState {
         } else {
             group.items.clone()
         };
-        
+
         // If search query is active, filter items to only include matches
         if !self.search_query.trim().is_empty() {
             let (type_filter, extension_filter, text_query) = self.parse_search_query();
             let extension_filter_clone = extension_filter.clone();
-            
-            all_items.into_iter().filter(|&item_idx| {
-                if let Some(item) = self.all_items.get(item_idx) {
-                    // Check extension filter first (exact match)
-                    if let Some(ref filter_ext) = extension_filter_clone {
-                        if let Some(item_ext) = item.path.extension().and_then(|e| e.to_str()) {
-                            if item_ext.to_lowercase() != *filter_ext {
+
+            all_items
+                .into_iter()
+                .filter(|&item_idx| {
+                    if let Some(item) = self.all_items.get(item_idx) {
+                        // Check extension filter first (exact match)
+                        if let Some(ref filter_ext) = extension_filter_clone {
+                            if let Some(item_ext) = item.path.extension().and_then(|e| e.to_str()) {
+                                if item_ext.to_lowercase() != *filter_ext {
+                                    return false;
+                                }
+                            } else {
                                 return false;
                             }
-                        } else {
+                        }
+
+                        // Check type filter (category-based)
+                        if let Some(filter_type) = type_filter {
+                            let item_type = crate::utils::detect_file_type(&item.path);
+                            if item_type != filter_type {
+                                return false;
+                            }
+                        }
+
+                        // Check text query if present
+                        if !text_query.is_empty() {
+                            let path_str = item.path.display().to_string().to_lowercase();
+                            if path_str.contains(&text_query) {
+                                return true;
+                            }
+                            if let Some(display_name) = item.display_name.as_ref() {
+                                return display_name.to_lowercase().contains(&text_query);
+                            }
                             return false;
                         }
+
+                        // If only type/extension filter (and it matched), return true
+                        true
+                    } else {
+                        false
                     }
-                    
-                    // Check type filter (category-based)
-                    if let Some(filter_type) = type_filter {
-                        let item_type = crate::utils::detect_file_type(&item.path);
-                        if item_type != filter_type {
-                            return false;
-                        }
-                    }
-                    
-                    // Check text query if present
-                    if !text_query.is_empty() {
-                        let path_str = item.path.display().to_string().to_lowercase();
-                        if path_str.contains(&text_query) {
-                            return true;
-                        }
-                        if let Some(display_name) = item.display_name.as_ref() {
-                            return display_name.to_lowercase().contains(&text_query);
-                        }
-                        return false;
-                    }
-                    
-                    // If only type/extension filter (and it matched), return true
-                    true
-                } else {
-                    false
-                }
-            }).collect()
+                })
+                .collect()
         } else {
             all_items
         }
@@ -2972,11 +2978,11 @@ impl AppState {
         if group.folder_groups.is_empty() {
             return Vec::new();
         }
-        
+
         // Build folder hierarchy to find children
         let scan_path = &self.scan_path;
         let hierarchy = build_folder_hierarchy(scan_path, &group.name, &group.folder_groups);
-        
+
         // Recursively collect items from this folder and all its children
         fn collect_subtree_items(
             folder_idx: usize,
@@ -2989,53 +2995,56 @@ impl AppState {
             }
             items
         }
-        
+
         let all_items = collect_subtree_items(folder_idx, group, &hierarchy.children);
-        
+
         // If search query is active, filter items to only include matches
         if !self.search_query.trim().is_empty() {
             let (type_filter, extension_filter, text_query) = self.parse_search_query();
             let extension_filter_clone = extension_filter.clone();
-            
-            all_items.into_iter().filter(|&item_idx| {
-                if let Some(item) = self.all_items.get(item_idx) {
-                    // Check extension filter first (exact match)
-                    if let Some(ref filter_ext) = extension_filter_clone {
-                        if let Some(item_ext) = item.path.extension().and_then(|e| e.to_str()) {
-                            if item_ext.to_lowercase() != *filter_ext {
+
+            all_items
+                .into_iter()
+                .filter(|&item_idx| {
+                    if let Some(item) = self.all_items.get(item_idx) {
+                        // Check extension filter first (exact match)
+                        if let Some(ref filter_ext) = extension_filter_clone {
+                            if let Some(item_ext) = item.path.extension().and_then(|e| e.to_str()) {
+                                if item_ext.to_lowercase() != *filter_ext {
+                                    return false;
+                                }
+                            } else {
                                 return false;
                             }
-                        } else {
+                        }
+
+                        // Check type filter (category-based)
+                        if let Some(filter_type) = type_filter {
+                            let item_type = crate::utils::detect_file_type(&item.path);
+                            if item_type != filter_type {
+                                return false;
+                            }
+                        }
+
+                        // Check text query if present
+                        if !text_query.is_empty() {
+                            let path_str = item.path.display().to_string().to_lowercase();
+                            if path_str.contains(&text_query) {
+                                return true;
+                            }
+                            if let Some(display_name) = item.display_name.as_ref() {
+                                return display_name.to_lowercase().contains(&text_query);
+                            }
                             return false;
                         }
+
+                        // If only type/extension filter (and it matched), return true
+                        true
+                    } else {
+                        false
                     }
-                    
-                    // Check type filter (category-based)
-                    if let Some(filter_type) = type_filter {
-                        let item_type = crate::utils::detect_file_type(&item.path);
-                        if item_type != filter_type {
-                            return false;
-                        }
-                    }
-                    
-                    // Check text query if present
-                    if !text_query.is_empty() {
-                        let path_str = item.path.display().to_string().to_lowercase();
-                        if path_str.contains(&text_query) {
-                            return true;
-                        }
-                        if let Some(display_name) = item.display_name.as_ref() {
-                            return display_name.to_lowercase().contains(&text_query);
-                        }
-                        return false;
-                    }
-                    
-                    // If only type/extension filter (and it matched), return true
-                    true
-                } else {
-                    false
-                }
-            }).collect()
+                })
+                .collect()
         } else {
             all_items
         }

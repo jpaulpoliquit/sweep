@@ -278,16 +278,21 @@ pub fn run(initial_state: Option<AppState>) -> Result<()> {
                 let (tx, rx) = mpsc::channel();
                 let (progress_tx, progress_rx) = mpsc::channel();
                 let scan_path_clone = scan_path.clone();
-                
+
                 // Clone progress_tx for the callback
                 let progress_tx_clone = progress_tx.clone();
                 std::thread::spawn(move || {
                     use crate::disk_usage::scan_directory_with_progress;
-                    let progress_callback: Option<crate::disk_usage::ProgressCallback> = Some(Box::new(move |path: &std::path::Path| {
-                        // Send progress update (ignore errors if receiver is dropped)
-                        let _ = progress_tx_clone.send(path.to_path_buf());
-                    }));
-                    let result = scan_directory_with_progress(&scan_path_clone, effective_depth, progress_callback);
+                    let progress_callback: Option<crate::disk_usage::ProgressCallback> =
+                        Some(Box::new(move |path: &std::path::Path| {
+                            // Send progress update (ignore errors if receiver is dropped)
+                            let _ = progress_tx_clone.send(path.to_path_buf());
+                        }));
+                    let result = scan_directory_with_progress(
+                        &scan_path_clone,
+                        effective_depth,
+                        progress_callback,
+                    );
                     let _ = tx.send(result);
                 });
 
@@ -298,7 +303,10 @@ pub fn run(initial_state: Option<AppState>) -> Result<()> {
                     match rx.try_recv() {
                         Ok(Ok(insights)) => {
                             // Check if scan was cancelled
-                            if !matches!(app_state.screen, crate::tui::state::Screen::Scanning { .. }) {
+                            if !matches!(
+                                app_state.screen,
+                                crate::tui::state::Screen::Scanning { .. }
+                            ) {
                                 // Scan was cancelled, ignore result and exit loop
                                 break;
                             }
@@ -309,6 +317,7 @@ pub fn run(initial_state: Option<AppState>) -> Result<()> {
                                 current_path: scan_path,
                                 cursor: 0,
                                 sort_by: SortBy::Size,
+                                selected_paths: std::collections::HashSet::new(),
                             };
                             app_state.pending_action = crate::tui::state::PendingAction::None;
                             break;
@@ -323,11 +332,13 @@ pub fn run(initial_state: Option<AppState>) -> Result<()> {
                         Err(mpsc::TryRecvError::Empty) => {
                             // Check for progress updates (individual files being read)
                             while let Ok(file_path) = progress_rx.try_recv() {
-                                if let crate::tui::state::Screen::Scanning { ref mut progress } = app_state.screen {
+                                if let crate::tui::state::Screen::Scanning { ref mut progress } =
+                                    app_state.screen
+                                {
                                     progress.current_path = Some(file_path);
                                 }
                             }
-                            
+
                             // Scan still in progress, update tick and redraw for animation
                             if last_tick_update_scan.elapsed().as_millis() >= 100 {
                                 app_state.tick = app_state.tick.wrapping_add(1);
@@ -337,7 +348,10 @@ pub fn run(initial_state: Option<AppState>) -> Result<()> {
                             }
 
                             // Check for cancellation
-                            if !matches!(app_state.screen, crate::tui::state::Screen::Scanning { .. }) {
+                            if !matches!(
+                                app_state.screen,
+                                crate::tui::state::Screen::Scanning { .. }
+                            ) {
                                 // Scan was cancelled, exit loop
                                 break;
                             }
@@ -444,7 +458,7 @@ pub fn run(initial_state: Option<AppState>) -> Result<()> {
                             app_state.screen = crate::tui::state::Screen::Results;
                         }
                     }
-                    
+
                     // Immediately redraw to show results screen without delay
                     terminal.draw(|f| render(f, &mut app_state))?;
                 }

@@ -411,9 +411,7 @@ pub struct BootInfo {
 
 /// Gather status asynchronously in a background thread
 /// This allows the UI to remain responsive while gathering system metrics
-pub fn gather_status_async(
-    sender: std::sync::mpsc::Sender<Result<SystemStatus>>,
-) {
+pub fn gather_status_async(sender: std::sync::mpsc::Sender<Result<SystemStatus>>) {
     std::thread::spawn(move || {
         use sysinfo::System;
         let mut system = System::new();

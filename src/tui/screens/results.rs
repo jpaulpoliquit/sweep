@@ -9,6 +9,7 @@ use crate::tui::{
     },
 };
 use crate::utils::{detect_file_type, FileType};
+use chrono;
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
@@ -17,7 +18,6 @@ use ratatui::{
     Frame,
 };
 use std::time::SystemTime;
-use chrono;
 
 // Helper function to format numbers with commas
 fn format_number(n: u64) -> String {
@@ -213,35 +213,11 @@ fn folder_emoji(app_state: &AppState, folder: &crate::tui::state::FolderGroup) -
         // If counts are equal, compare by FileType Debug representation for deterministic result
         format!("{:?}", a.0).cmp(&format!("{:?}", b.0))
     });
-    
+
     if let Some((dominant_type, _)) = type_vec.first() {
         dominant_type.emoji()
     } else {
         "📁" // Default folder emoji if no items
-    }
-}
-
-fn format_ago(t: Option<SystemTime>) -> String {
-    let Some(t) = t else {
-        return "--".to_string();
-    };
-    let Ok(elapsed) = t.elapsed() else {
-        return "--".to_string();
-    };
-    let secs = elapsed.as_secs();
-    // Always show at least "1m ago" for recent/active apps (no seconds)
-    if secs < 60 {
-        "1m ago".to_string()
-    } else if secs < 3600 {
-        format!("{}m ago", secs / 60)
-    } else if secs < 86400 {
-        format!("{}h ago", secs / 3600)
-    } else if secs < 86400 * 14 {
-        format!("{}d ago", secs / 86400)
-    } else if secs < 86400 * 365 {
-        format!("{}w ago", secs / (86400 * 7))
-    } else {
-        format!("{}y ago", secs / (86400 * 365))
     }
 }
 
@@ -251,26 +227,24 @@ fn format_date(t: Option<SystemTime>) -> String {
     };
     // Convert SystemTime to DateTime<Local>
     let datetime = match t.duration_since(std::time::UNIX_EPOCH) {
-        Ok(duration) => {
-            chrono::DateTime::<chrono::Utc>::from_timestamp(
-                duration.as_secs() as i64,
-                duration.subsec_nanos(),
-            )
-            .map(|dt: chrono::DateTime<chrono::Utc>| dt.with_timezone(&chrono::Local))
-        }
+        Ok(duration) => chrono::DateTime::<chrono::Utc>::from_timestamp(
+            duration.as_secs() as i64,
+            duration.subsec_nanos(),
+        )
+        .map(|dt: chrono::DateTime<chrono::Utc>| dt.with_timezone(&chrono::Local)),
         Err(_) => return "--".to_string(),
     };
-    
+
     if let Some(dt) = datetime {
         let now = chrono::Local::now();
         let days_diff = (now.date_naive() - dt.date_naive()).num_days();
-        
+
         // Format as relative dates
         match days_diff {
             0 => "today".to_string(),
             1 => "yesterday".to_string(),
             d if d > 1 && d < 7 => format!("{}d ago", d),
-            d if d >= 7 && d < 30 => {
+            d if (7..30).contains(&d) => {
                 let weeks = d / 7;
                 if weeks == 1 {
                     "1w ago".to_string()
@@ -278,7 +252,7 @@ fn format_date(t: Option<SystemTime>) -> String {
                     format!("{}w ago", weeks)
                 }
             }
-            d if d >= 30 && d < 365 => {
+            d if (30..365).contains(&d) => {
                 let months = d / 30;
                 if months == 1 {
                     "1mo ago".to_string()
@@ -380,7 +354,11 @@ fn fun_comparison(bytes: u64) -> Option<String> {
         if hours >= 1 {
             Some(format!("~{} hours of HD video (~{:.1} GB)", hours, gb))
         } else {
-            Some(format!("~{:.1} hours of HD video (~{:.1} GB)", bytes as f64 / hd_video_hour as f64, gb))
+            Some(format!(
+                "~{:.1} hours of HD video (~{:.1} GB)",
+                bytes as f64 / hd_video_hour as f64,
+                gb
+            ))
         }
     } else if bytes >= 10 * MB {
         let count = bytes / floppy_size;
@@ -592,11 +570,7 @@ fn render_search_bar(f: &mut Frame, area: Rect, app_state: &AppState) {
                     ));
 
             if is_extension {
-                let ext = if type_str.starts_with('.') {
-                    type_str[1..].to_string()
-                } else {
-                    type_str.clone()
-                };
+                let ext = type_str.strip_prefix('.').unwrap_or(&type_str).to_string();
                 (None, Some(ext), text)
             } else {
                 let file_type = match_file_type_string(&type_str);
@@ -643,11 +617,7 @@ fn render_search_bar(f: &mut Frame, area: Rect, app_state: &AppState) {
                     ));
 
             if is_extension {
-                let ext = if type_str.starts_with('.') {
-                    type_str[1..].to_string()
-                } else {
-                    type_str.clone()
-                };
+                let ext = type_str.strip_prefix('.').unwrap_or(&type_str).to_string();
                 (None, Some(ext), text)
             } else {
                 let file_type = match_file_type_string(&type_str);
@@ -703,8 +673,7 @@ fn match_file_type_string(type_str: &str) -> Option<crate::utils::FileType> {
     let type_lower = type_str.to_lowercase();
 
     // If it starts with ., definitely treat as extension
-    if type_lower.starts_with('.') {
-        let ext = &type_lower[1..];
+    if let Some(ext) = type_lower.strip_prefix('.') {
         let test_path_str = format!("file.{}", ext);
         let test_path = std::path::Path::new(&test_path_str);
         let detected_type = crate::utils::detect_file_type(test_path);
@@ -854,31 +823,33 @@ fn render_grouped_results(f: &mut Frame, area: Rect, app_state: &mut AppState) {
                         // Add emoji based on file type
                         let file_type = detect_file_type(&item.path);
                         let emoji = file_type.emoji();
-                        
+
                         // Calculate fixed widths for metadata columns
                         // Size column: 8 chars (e.g., "793.7 MiB")
                         // Date column: 3 chars (" | ") + up to 10 chars (e.g., "yesterday", "2mo ago")
                         let date_width = if date_str.is_some() { 3 + 10 } else { 0 };
                         let metadata_width = 8 + date_width;
-                        
+
                         let fixed_prefix = indent.len()
                             + 3 /*checkbox*/
                             + 1 /*space*/
                             + 3 /*emoji + space*/;
-                        
+
                         // Calculate available width for file name - better alignment, not too far right
                         let min_name_width = 8; // Minimum for readability
                         let max_name_width = (inner.width as usize)
                             .saturating_sub(fixed_prefix)
                             .saturating_sub(metadata_width);
-                        
+
                         let name_column_width = max_name_width.max(min_name_width);
-                        
+
                         // Truncate file name if needed, pad to ensure metadata alignment
                         let display_str_truncated = truncate_end(&display_str, name_column_width);
-                        let padding_needed = name_column_width.saturating_sub(display_str_truncated.chars().count());
-                        let display_str_padded = format!("{}{}", display_str_truncated, " ".repeat(padding_needed));
-                        
+                        let padding_needed =
+                            name_column_width.saturating_sub(display_str_truncated.chars().count());
+                        let display_str_padded =
+                            format!("{}{}", display_str_truncated, " ".repeat(padding_needed));
+
                         let base_style = Styles::primary();
                         let hl_style =
                             base_style.add_modifier(Modifier::BOLD | Modifier::UNDERLINED);
@@ -1188,21 +1159,21 @@ fn render_grouped_results(f: &mut Frame, area: Rect, app_state: &mut AppState) {
                 // Date column: 3 chars (" | ") + up to 10 chars (e.g., "yesterday", "2mo ago")
                 let date_width = if date_str.is_some() { 3 + 10 } else { 0 };
                 let metadata_width = 2 + 8 + date_width;
-                
+
                 let fixed_prefix = indent.len()
                     + 3 /*prefix+spaces*/
                     + 3 /*checkbox*/
                     + 1 /*space*/
                     + 3 /*emoji + space*/;
-                
+
                 // Calculate available width for file name - better alignment, not too far right
                 let min_name_width = 8; // Minimum for readability
                 let max_name_width = (inner.width as usize)
                     .saturating_sub(fixed_prefix)
                     .saturating_sub(metadata_width);
-                
+
                 let name_column_width = max_name_width.max(min_name_width);
-                
+
                 // Truncate file name if needed, pad to ensure metadata alignment
                 let path_display = truncate_end(&path_str, name_column_width);
                 let padding_needed = name_column_width.saturating_sub(path_display.chars().count());

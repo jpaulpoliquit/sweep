@@ -162,7 +162,7 @@ impl ScanCache {
             .transaction()
             .with_context(|| "Failed to start migration transaction")?;
 
-        if from_version == 0 {
+        if from_version < 1 {
             // Initial schema
             tx.execute(
                 "CREATE TABLE IF NOT EXISTS file_records (
@@ -218,7 +218,7 @@ impl ScanCache {
                 .with_context(|| "Failed to update schema version")?;
         }
 
-        if from_version == 1 {
+        if from_version < 2 {
             // Migration to version 2: Add per-category scan IDs
             // Create category_scans table to track scan IDs per category
             tx.execute(
@@ -256,7 +256,7 @@ impl ScanCache {
                 .with_context(|| "Failed to update schema version")?;
         }
 
-        if from_version == 2 {
+        if from_version < 3 {
             // Migration to version 3: Add file_categories junction table to support multiple categories per file
             // Create file_categories table to track which categories each file belongs to
             tx.execute(
@@ -416,7 +416,7 @@ impl ScanCache {
 
         // Check each file
         for path in paths {
-            let path_str = normalize_path(&path);
+            let path_str = normalize_path(path);
 
             if let Some((cached_size, mtime_secs, mtime_nsecs)) = cached.get(&path_str) {
                 // File is in cache, check if it changed
@@ -632,7 +632,7 @@ impl ScanCache {
         let categories: Vec<String> = {
             let mut stmt = self.db.prepare("SELECT category FROM category_scans")?;
             let mut categories = Vec::new();
-            let rows = stmt.query_map([], |row| Ok(row.get::<_, String>(0)?))?;
+            let rows = stmt.query_map([], |row| row.get::<_, String>(0))?;
             for row in rows {
                 categories.push(row?);
             }
@@ -673,7 +673,7 @@ impl ScanCache {
                     let mut paths = Vec::new();
                     let rows = stmt
                         .query_map(params![&category, previous_category_scan_id], |row| {
-                            Ok(row.get::<_, String>(0)?)
+                            row.get::<_, String>(0)
                         })?;
 
                     for row in rows {
@@ -1001,7 +1001,7 @@ fn normalize_path(path: &Path) -> String {
 fn decode_path(value: &str) -> PathBuf {
     #[cfg(windows)]
     {
-        return PathBuf::from(value);
+        PathBuf::from(value)
     }
     #[cfg(not(windows))]
     {

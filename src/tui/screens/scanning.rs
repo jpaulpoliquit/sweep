@@ -40,7 +40,10 @@ fn fun_comparison_short(bytes: u64) -> Option<String> {
         if hours >= 1 {
             Some(format!("(~{} hours of HD video!)", hours))
         } else {
-            Some(format!("(~{:.1} hours of HD video!)", bytes as f64 / hd_video_hour as f64))
+            Some(format!(
+                "(~{:.1} hours of HD video!)",
+                bytes as f64 / hd_video_hour as f64
+            ))
         }
     } else if bytes >= 10 * MB {
         let count = bytes / floppy_size;

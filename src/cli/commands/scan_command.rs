@@ -46,6 +46,7 @@ fn get_disk_space_for_path(path: &Path) -> Option<(u64, u64)> {
     best.map(|(_, total, avail)| (total, avail))
 }
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_scan(
     all: bool,
     cache: bool,

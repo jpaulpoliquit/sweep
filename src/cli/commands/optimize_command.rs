@@ -6,6 +6,7 @@ use crate::optimize;
 use crate::output::OutputMode;
 use crate::theme::Theme;
 
+#[allow(clippy::too_many_arguments)]
 pub(crate) fn handle_optimize(
     all: bool,
     dns: bool,

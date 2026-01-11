@@ -794,7 +794,7 @@ impl RestoreResult {
         format!(
             "Restored {} items ({}), {} errors, {} not found",
             self.restored,
-            bytesize::to_string(self.restored_bytes, false),
+            bytesize::to_string(self.restored_bytes, true),
             self.errors,
             self.not_found
         )

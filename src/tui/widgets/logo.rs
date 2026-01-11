@@ -37,17 +37,17 @@ pub fn render_logo(f: &mut Frame, area: Rect) {
         width: area.width,
         height: LOGO_HEIGHT,
     };
-    
+
     // Create 2-column layout: left column for logo, right column for git/tagline
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Length(LOGO_WIDTH), // Left column for logo (fixed width)
-            Constraint::Length(1),  // Minimal spacing between columns
+            Constraint::Length(1),          // Minimal spacing between columns
             Constraint::Length(50), // Right column for git/tagline (enough for full tagline)
         ])
         .split(logo_area);
-    
+
     // Render logo in the left column
     render_logo_with_style(f, columns[0], Alignment::Left, false, 0)
 }
@@ -160,22 +160,23 @@ pub fn render_tagline(f: &mut Frame, area: Rect) {
         width: area.width,
         height: LOGO_HEIGHT,
     };
-    
+
     // Create 2-column layout: left column for logo, right column for git/tagline
     // Must match the layout in render_logo() exactly
     let columns = Layout::default()
         .direction(Direction::Horizontal)
         .constraints([
             Constraint::Length(LOGO_WIDTH), // Left column for logo (fixed width)
-            Constraint::Length(1),  // Minimal spacing between columns
+            Constraint::Length(1),          // Minimal spacing between columns
             Constraint::Length(50), // Right column for git/tagline (enough for full tagline)
         ])
         .split(logo_area);
-    
+
     // Git link is in the right column, aligned with the top of the logo
-    let git_link = Paragraph::new(Line::from(vec![
-        Span::styled("github.com/jplx05/wole", Styles::secondary()),
-    ]))
+    let git_link = Paragraph::new(Line::from(vec![Span::styled(
+        "github.com/jplx05/wole",
+        Styles::secondary(),
+    )]))
     .alignment(Alignment::Left);
 
     let git_area = Rect {
@@ -187,9 +188,10 @@ pub fn render_tagline(f: &mut Frame, area: Rect) {
     f.render_widget(git_link, git_area);
 
     // Tagline is below the git link with a line space, also in the right column
-    let tagline = Paragraph::new(Line::from(vec![
-        Span::styled("Deep clean and optimize your Windows PC", Styles::secondary()),
-    ]))
+    let tagline = Paragraph::new(Line::from(vec![Span::styled(
+        "Deep clean and optimize your Windows PC",
+        Styles::secondary(),
+    )]))
     .alignment(Alignment::Left);
 
     let tagline_area = Rect {

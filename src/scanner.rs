@@ -113,6 +113,7 @@ fn try_incremental_scan(
 }
 
 /// Execute full category scan
+#[allow(clippy::too_many_arguments)]
 fn execute_category_scan(
     _category_name: &str,
     task: &ScanTask,
@@ -342,53 +343,67 @@ pub fn scan_all(
             }
 
             // Try incremental scan if cache is available
-            let result = if use_incremental && scan_cache.is_some() && scan_id.is_some() {
-                // Attempt incremental scan (pass scan_session_id, not category scan_id)
-                match try_incremental_scan(
-                    name,
-                    task,
-                    &path_owned,
-                    config,
-                    scan_cache.as_mut().unwrap(),
-                    scan_id.unwrap(),
-                    mode,
-                ) {
-                    Ok(Some(cached_result)) => {
-                        // Used cache successfully
-                        Ok(cached_result)
-                    }
-                    Ok(None) => {
-                        // Need to do full scan for this category
-                        execute_category_scan(
-                            name,
-                            task,
-                            &path_owned,
-                            config,
-                            mode,
-                            &build_config,
-                            &duplicates_config,
-                            &duplicate_groups,
-                        )
-                    }
-                    Err(e) => {
-                        // Cache error, fall back to full scan
-                        if mode != OutputMode::Quiet {
-                            eprintln!(
-                                "Warning: Cache error for {}: {}. Falling back to full scan.",
-                                name, e
-                            );
+            let result = if use_incremental {
+                if let (Some(cache), Some(scan_session_id)) = (scan_cache.as_mut(), scan_id) {
+                    // Attempt incremental scan (pass scan_session_id, not category scan_id)
+                    match try_incremental_scan(
+                        name,
+                        task,
+                        &path_owned,
+                        config,
+                        cache,
+                        scan_session_id,
+                        mode,
+                    ) {
+                        Ok(Some(cached_result)) => {
+                            // Used cache successfully
+                            Ok(cached_result)
                         }
-                        execute_category_scan(
-                            name,
-                            task,
-                            &path_owned,
-                            config,
-                            mode,
-                            &build_config,
-                            &duplicates_config,
-                            &duplicate_groups,
-                        )
+                        Ok(None) => {
+                            // Need to do full scan for this category
+                            execute_category_scan(
+                                name,
+                                task,
+                                &path_owned,
+                                config,
+                                mode,
+                                &build_config,
+                                &duplicates_config,
+                                &duplicate_groups,
+                            )
+                        }
+                        Err(e) => {
+                            // Cache error, fall back to full scan
+                            if mode != OutputMode::Quiet {
+                                eprintln!(
+                                    "Warning: Cache error for {}: {}. Falling back to full scan.",
+                                    name, e
+                                );
+                            }
+                            execute_category_scan(
+                                name,
+                                task,
+                                &path_owned,
+                                config,
+                                mode,
+                                &build_config,
+                                &duplicates_config,
+                                &duplicate_groups,
+                            )
+                        }
                     }
+                } else {
+                    // Full scan (no cache or cache disabled)
+                    execute_category_scan(
+                        name,
+                        task,
+                        &path_owned,
+                        config,
+                        mode,
+                        &build_config,
+                        &duplicates_config,
+                        &duplicate_groups,
+                    )
                 }
             } else {
                 // Full scan (no cache or cache disabled)
@@ -466,7 +481,7 @@ pub fn scan_all(
                     if let Ok(sig) = FileSignature::from_path(path, false) {
                         category_batches
                             .entry(category.to_string())
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push((sig, category.to_string()));
                     }
                 }
@@ -500,8 +515,7 @@ pub fn scan_all(
                 }
             }
 
-            let mut stats = ScanStats::default();
-            stats.total_files = results.cache.items
+            let total_files = results.cache.items
                 + results.app_cache.items
                 + results.temp.items
                 + results.trash.items
@@ -518,7 +532,11 @@ pub fn scan_all(
                 + results.event_logs.items;
 
             let removed = cache.cleanup_stale(scan_session_id).unwrap_or(0);
-            stats.removed_files = removed;
+            let stats = ScanStats {
+                total_files,
+                removed_files: removed,
+                ..Default::default()
+            };
             let _ = cache.finish_scan(scan_session_id, stats);
         }
     }
@@ -689,7 +707,7 @@ fn perform_full_disk_traversal_cli_grouped(
 
                         // Batch update cache periodically
                         if updates.len() >= BATCH_SIZE {
-                            let batch = updates.drain(..).collect::<Vec<_>>();
+                            let batch = std::mem::take(&mut *updates);
                             if let Err(e) = scan_cache.upsert_files_batch(&batch, scan_id) {
                                 eprintln!("\nWarning: Failed to update cache batch: {}", e);
                             }
@@ -698,7 +716,7 @@ fn perform_full_disk_traversal_cli_grouped(
                         }
 
                         let processed = files_processed.fetch_add(1, Ordering::Relaxed) + 1;
-                        if processed % YIELD_EVERY_FILES == 0
+                        if processed.is_multiple_of(YIELD_EVERY_FILES)
                             && last_yield.elapsed() >= Duration::from_millis(50)
                         {
                             std::thread::yield_now();
@@ -829,7 +847,7 @@ fn perform_full_disk_traversal(
 
                         // Batch update cache periodically
                         if cache_updates.len() >= BATCH_SIZE {
-                            let batch = cache_updates.drain(..).collect::<Vec<_>>();
+                            let batch = std::mem::take(&mut cache_updates);
                             if let Err(e) = scan_cache.upsert_files_batch(&batch, scan_id) {
                                 eprintln!("Warning: Failed to update cache batch: {}", e);
                             }
@@ -838,7 +856,7 @@ fn perform_full_disk_traversal(
                         }
 
                         processed_files += 1;
-                        if processed_files % YIELD_EVERY_FILES == 0
+                        if processed_files.is_multiple_of(YIELD_EVERY_FILES)
                             && last_yield.elapsed() >= Duration::from_millis(50)
                         {
                             std::thread::yield_now();
@@ -1196,7 +1214,7 @@ pub fn scan_all_with_progress(
                     if let Ok(sig) = FileSignature::from_path(path, false) {
                         category_batches
                             .entry(category.to_string())
-                            .or_insert_with(Vec::new)
+                            .or_default()
                             .push((sig, category.to_string()));
                     }
                 }
@@ -1230,8 +1248,7 @@ pub fn scan_all_with_progress(
                 }
             }
 
-            let mut stats = ScanStats::default();
-            stats.total_files = results.cache.items
+            let total_files = results.cache.items
                 + results.app_cache.items
                 + results.temp.items
                 + results.trash.items
@@ -1249,7 +1266,11 @@ pub fn scan_all_with_progress(
 
             // Cleanup and finish are non-fatal - scan already completed
             let removed = cache.cleanup_stale(scan_session_id).unwrap_or(0);
-            stats.removed_files = removed;
+            let stats = ScanStats {
+                total_files,
+                removed_files: removed,
+                ..Default::default()
+            };
             let _ = cache.finish_scan(scan_session_id, stats);
         }
     }

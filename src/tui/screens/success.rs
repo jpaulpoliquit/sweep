@@ -102,7 +102,8 @@ fn fun_comparison(bytes: u64) -> Option<String> {
         } else {
             Some(format!(
                 "That's like ~{:.1} hours of HD video (~{:.1} GB) worth of space!",
-                bytes as f64 / hd_video_hour as f64, gb
+                bytes as f64 / hd_video_hour as f64,
+                gb
             ))
         }
     } else if bytes >= 10 * MB {
@@ -156,14 +157,20 @@ pub fn render(f: &mut Frame, app_state: &AppState) {
         if let Some(free) = free_space {
             success_lines.push(Line::from(vec![
                 Span::styled("    Space freed: ", Styles::secondary()),
-                Span::styled(bytesize::to_string(cleaned_bytes, false), Styles::emphasis()),
+                Span::styled(
+                    bytesize::to_string(cleaned_bytes, false),
+                    Styles::emphasis(),
+                ),
                 Span::styled(" │ Free space now: ", Styles::secondary()),
                 Span::styled(bytesize::to_string(free, false), Styles::emphasis()),
             ]));
         } else {
             success_lines.push(Line::from(vec![
                 Span::styled("    Successfully freed ", Styles::primary()),
-                Span::styled(bytesize::to_string(cleaned_bytes, false), Styles::emphasis()),
+                Span::styled(
+                    bytesize::to_string(cleaned_bytes, false),
+                    Styles::emphasis(),
+                ),
                 Span::styled(" of disk space", Styles::primary()),
             ]));
         }
@@ -199,7 +206,10 @@ pub fn render(f: &mut Frame, app_state: &AppState) {
             ]),
             Line::from(vec![
                 Span::styled("    Space freed:         ", Styles::secondary()),
-                Span::styled(bytesize::to_string(cleaned_bytes, false), Styles::emphasis()),
+                Span::styled(
+                    bytesize::to_string(cleaned_bytes, false),
+                    Styles::emphasis(),
+                ),
             ]),
         ];
 
