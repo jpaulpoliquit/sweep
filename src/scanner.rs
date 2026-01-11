@@ -23,29 +23,29 @@ fn try_incremental_scan(
     _path: &Path,
     _config: &Config,
     cache: &mut ScanCache,
-    scan_id: i64,
+    scan_session_id: i64,
     _mode: OutputMode,
 ) -> Result<Option<CategoryResult>> {
-    // Get previous scan ID
-    let previous_scan_id = match cache.get_previous_scan_id()? {
+    // Get the previous category-specific scan ID (without incrementing)
+    let previous_category_scan_id = match cache.get_previous_category_scan_id(category_name)? {
         Some(id) => id,
-        None => return Ok(None), // No previous scan, need full scan
+        None => return Ok(None), // Category was never scanned before, need full scan
     };
 
-    // Get cached paths for this category
-    let cached_paths = cache.get_cached_category(category_name, previous_scan_id)?;
-    
+    // Get cached paths for this category from the previous category scan
+    let cached_paths = cache.get_cached_category(category_name, previous_category_scan_id)?;
+
     if cached_paths.is_empty() {
         return Ok(None); // No cached paths, need full scan
     }
 
     // Check which files changed
     let status_map = cache.check_files_batch(&cached_paths)?;
-    
+
     let mut unchanged_paths = HashSet::new();
     let mut changed_paths = Vec::new();
     let new_paths: Vec<PathBuf> = Vec::new();
-    
+
     for (path, status) in status_map {
         match status {
             crate::scan_cache::FileStatus::Unchanged => {
@@ -75,7 +75,7 @@ fn try_incremental_scan(
 
     // Build result from cached paths
     let mut result = CategoryResult::default();
-    
+
     for path in &unchanged_paths {
         if let Ok(metadata) = std::fs::metadata(path) {
             result.items += 1;
@@ -83,6 +83,9 @@ fn try_incremental_scan(
             result.paths.push(path.clone());
         }
     }
+
+    // Get the new category scan ID for updating cache
+    let new_category_scan_id = cache.get_category_scan_id(category_name, scan_session_id)?;
 
     // Update cache with unchanged files (batch for efficiency)
     let mut cache_updates = Vec::new();
@@ -93,7 +96,7 @@ fn try_incremental_scan(
     }
     if !cache_updates.is_empty() {
         // Ignore cache update errors - scan can continue without cache
-        let _ = cache.upsert_files_batch(&cache_updates, scan_id);
+        let _ = cache.upsert_files_batch(&cache_updates, new_category_scan_id);
     }
 
     // If there are changed/new files, we'd need to scan them
@@ -118,7 +121,9 @@ fn execute_category_scan(
     mode: OutputMode,
     build_config: &crate::config::CategoryConfig,
     duplicates_config: &crate::config::DuplicatesConfig,
-    duplicate_groups: &std::cell::RefCell<Option<Vec<crate::categories::duplicates::DuplicateGroup>>>,
+    duplicate_groups: &std::cell::RefCell<
+        Option<Vec<crate::categories::duplicates::DuplicateGroup>>,
+    >,
 ) -> Result<CategoryResult> {
     match task {
         ScanTask::Cache => categories::cache::scan(path, config, mode),
@@ -128,20 +133,14 @@ fn execute_category_scan(
         ScanTask::Build(age) => {
             categories::build::scan(path, *age, Some(build_config), config, mode)
         }
-        ScanTask::Downloads(age) => {
-            categories::downloads::scan(path, *age, config, mode)
-        }
+        ScanTask::Downloads(age) => categories::downloads::scan(path, *age, config, mode),
         ScanTask::Large(size) => categories::large::scan(path, *size, config, mode),
         ScanTask::Old(age) => categories::old::scan(path, *age, config, mode),
         ScanTask::Browser => categories::browser::scan(path, config),
         ScanTask::System => categories::system::scan(path, config),
         ScanTask::Empty => categories::empty::scan(path, config),
         ScanTask::Duplicates => {
-            match categories::duplicates::scan_with_config(
-                path,
-                Some(duplicates_config),
-                config,
-            ) {
+            match categories::duplicates::scan_with_config(path, Some(duplicates_config), config) {
                 Ok(dup_result) => {
                     // Store groups for enhanced display
                     *duplicate_groups.borrow_mut() = Some(dup_result.groups.clone());
@@ -260,7 +259,11 @@ pub fn scan_all(
             if cache_enabled {
                 is_first_scan = previous_scan_id.is_none();
                 use_incremental = previous_scan_id.is_some();
-                let scan_type = if use_incremental { "incremental" } else { "full" };
+                let scan_type = if use_incremental {
+                    "incremental"
+                } else {
+                    "full"
+                };
                 match cache.start_scan(scan_type, &categories) {
                     Ok(id) => scan_id = Some(id),
                     Err(e) => {
@@ -276,13 +279,17 @@ pub fn scan_all(
             }
         }
     }
-    
-    // On first scan, perform full disk traversal to build baseline (CLI mode)
-    if is_first_scan && mode != OutputMode::Quiet {
+
+    // On first scan, optionally perform full-disk traversal to build a deep baseline (CLI mode).
+    // Default is category-only scanning (faster/lighter).
+    if is_first_scan && config.cache.full_disk_baseline && mode != OutputMode::Quiet {
         if let Some(cache) = scan_cache.as_mut() {
             if let Some(id) = scan_id {
                 if let Err(e) = perform_full_disk_traversal_cli_grouped(path, config, cache, id) {
-                    eprintln!("Warning: Full disk traversal failed: {}. Continuing with category scans.", e);
+                    eprintln!(
+                        "Warning: Full disk traversal failed: {}. Continuing with category scans.",
+                        e
+                    );
                 }
             }
         }
@@ -336,27 +343,65 @@ pub fn scan_all(
 
             // Try incremental scan if cache is available
             let result = if use_incremental && scan_cache.is_some() && scan_id.is_some() {
-                // Attempt incremental scan
-                match try_incremental_scan(name, task, &path_owned, config, scan_cache.as_mut().unwrap(), scan_id.unwrap(), mode) {
+                // Attempt incremental scan (pass scan_session_id, not category scan_id)
+                match try_incremental_scan(
+                    name,
+                    task,
+                    &path_owned,
+                    config,
+                    scan_cache.as_mut().unwrap(),
+                    scan_id.unwrap(),
+                    mode,
+                ) {
                     Ok(Some(cached_result)) => {
                         // Used cache successfully
                         Ok(cached_result)
                     }
                     Ok(None) => {
                         // Need to do full scan for this category
-                        execute_category_scan(name, task, &path_owned, config, mode, &build_config, &duplicates_config, &duplicate_groups)
+                        execute_category_scan(
+                            name,
+                            task,
+                            &path_owned,
+                            config,
+                            mode,
+                            &build_config,
+                            &duplicates_config,
+                            &duplicate_groups,
+                        )
                     }
                     Err(e) => {
                         // Cache error, fall back to full scan
                         if mode != OutputMode::Quiet {
-                            eprintln!("Warning: Cache error for {}: {}. Falling back to full scan.", name, e);
+                            eprintln!(
+                                "Warning: Cache error for {}: {}. Falling back to full scan.",
+                                name, e
+                            );
                         }
-                        execute_category_scan(name, task, &path_owned, config, mode, &build_config, &duplicates_config, &duplicate_groups)
+                        execute_category_scan(
+                            name,
+                            task,
+                            &path_owned,
+                            config,
+                            mode,
+                            &build_config,
+                            &duplicates_config,
+                            &duplicate_groups,
+                        )
                     }
                 }
             } else {
                 // Full scan (no cache or cache disabled)
-                execute_category_scan(name, task, &path_owned, config, mode, &build_config, &duplicates_config, &duplicate_groups)
+                execute_category_scan(
+                    name,
+                    task,
+                    &path_owned,
+                    config,
+                    mode,
+                    &build_config,
+                    &duplicates_config,
+                    &duplicate_groups,
+                )
             };
 
             (*name, result)
@@ -405,9 +450,56 @@ pub fn scan_all(
     // This can be removed entirely once we verify all scanners properly handle exclusions.
     filter_exclusions(&mut results, config);
 
-    // Finish scan session if cache is enabled (non-fatal if it fails)
+    // Save scanned files to cache and finish scan session if cache is enabled (non-fatal if it fails)
     if let Some(cache) = scan_cache.as_mut() {
-        if let Some(scan_id) = cache.current_scan_id() {
+        if let Some(scan_session_id) = cache.current_scan_id() {
+            // Save all scanned files to cache using per-category scan IDs
+            // Group files by category and save each group with its category-specific scan ID
+            let mut category_batches: std::collections::HashMap<
+                String,
+                Vec<(FileSignature, String)>,
+            > = std::collections::HashMap::new();
+
+            // Helper to add paths from a category result
+            let mut add_category_paths = |paths: &[PathBuf], category: &str| {
+                for path in paths {
+                    if let Ok(sig) = FileSignature::from_path(path, false) {
+                        category_batches
+                            .entry(category.to_string())
+                            .or_insert_with(Vec::new)
+                            .push((sig, category.to_string()));
+                    }
+                }
+            };
+
+            add_category_paths(&results.cache.paths, "cache");
+            add_category_paths(&results.app_cache.paths, "app_cache");
+            add_category_paths(&results.temp.paths, "temp");
+            add_category_paths(&results.trash.paths, "trash");
+            add_category_paths(&results.build.paths, "build");
+            add_category_paths(&results.downloads.paths, "downloads");
+            add_category_paths(&results.large.paths, "large");
+            add_category_paths(&results.old.paths, "old");
+            add_category_paths(&results.browser.paths, "browser");
+            add_category_paths(&results.system.paths, "system");
+            add_category_paths(&results.empty.paths, "empty");
+            add_category_paths(&results.duplicates.paths, "duplicates");
+            add_category_paths(&results.applications.paths, "applications");
+            add_category_paths(&results.windows_update.paths, "windows_update");
+            add_category_paths(&results.event_logs.paths, "event_logs");
+
+            // Save each category's files with its category-specific scan ID
+            for (category, files) in category_batches {
+                if !files.is_empty() {
+                    // Get category scan ID (increments if category was scanned before)
+                    if let Ok(category_scan_id) =
+                        cache.get_category_scan_id(&category, scan_session_id)
+                    {
+                        let _ = cache.upsert_files_batch(&files, category_scan_id);
+                    }
+                }
+            }
+
             let mut stats = ScanStats::default();
             stats.total_files = results.cache.items
                 + results.app_cache.items
@@ -425,9 +517,9 @@ pub fn scan_all(
                 + results.windows_update.items
                 + results.event_logs.items;
 
-            let removed = cache.cleanup_stale(scan_id).unwrap_or(0);
+            let removed = cache.cleanup_stale(scan_session_id).unwrap_or(0);
             stats.removed_files = removed;
-            let _ = cache.finish_scan(scan_id, stats);
+            let _ = cache.finish_scan(scan_session_id, stats);
         }
     }
 
@@ -441,27 +533,33 @@ fn perform_full_disk_traversal_cli_grouped(
     scan_cache: &mut ScanCache,
     scan_id: i64,
 ) -> Result<()> {
-    use walkdir::WalkDir;
-    use std::sync::atomic::{AtomicU64, Ordering};
-    use std::sync::Mutex;
-    use std::path::PathBuf;
     use std::collections::HashMap;
     use std::io::{self, Write};
-    
+    use std::path::PathBuf;
+    use std::sync::atomic::{AtomicU64, Ordering};
+    use std::sync::Mutex;
+    use std::time::{Duration, Instant};
+    use walkdir::WalkDir;
+
     let files_processed = AtomicU64::new(0);
-    let cache_updates: Mutex<Vec<(crate::scan_cache::FileSignature, String)>> = Mutex::new(Vec::new());
-    const BATCH_SIZE: usize = 1000; // Batch cache updates for efficiency
-    
+    let cache_updates: Mutex<Vec<(crate::scan_cache::FileSignature, String)>> =
+        Mutex::new(Vec::new());
+    // Smaller batches smooth out CPU/disk spikes (lighter on the device).
+    const BATCH_SIZE: usize = 500;
+    const YIELD_EVERY_FILES: u64 = 10_000;
+    const SLEEP_AFTER_BATCH: Duration = Duration::from_millis(5);
+    let mut last_yield = Instant::now();
+
     // Track parent folders (top-level milestones) and their stats
     let mut parent_folders: HashMap<PathBuf, (usize, u64)> = HashMap::new(); // (file_count, total_size)
     let mut current_parent: Option<PathBuf> = None;
     let mut spinner_frame = 0u8;
     let mut last_update = std::time::Instant::now();
     const UPDATE_INTERVAL_MS: u64 = 100; // Update display every 100ms
-    
+
     // Determine what constitutes a "parent folder" - use depth 1 or 2 from root
     const PARENT_DEPTH_THRESHOLD: usize = 2;
-    
+
     // Helper to print/update a single line (overwrites previous line)
     let print_line = |message: &str| {
         print!("\r{}", message);
@@ -469,7 +567,7 @@ fn perform_full_disk_traversal_cli_grouped(
         print!("\x1b[K");
         io::stdout().flush().ok();
     };
-    
+
     // Helper to get spinner character
     let get_spinner = |frame: u8| -> char {
         match frame % 4 {
@@ -480,7 +578,7 @@ fn perform_full_disk_traversal_cli_grouped(
             _ => '⠋',
         }
     };
-    
+
     // Use walkdir (sequential) for CLI to avoid thread safety issues
     for entry in WalkDir::new(root_path)
         .max_depth(20) // Reasonable depth limit
@@ -488,43 +586,52 @@ fn perform_full_disk_traversal_cli_grouped(
         .into_iter()
         .filter_entry(|e| {
             let entry_path = e.path();
-            
+
             // Skip system paths
             if crate::utils::is_system_path(entry_path) {
                 return false;
             }
-            
-            // Skip symlinks and reparse points
-            if e.file_type().is_symlink() || crate::utils::is_windows_reparse_point(entry_path) {
+
+            // Skip symlinks
+            if e.file_type().is_symlink() {
                 return false;
             }
-            
+
+            // Only check reparse points for directories (optimization: skip syscall for files)
+            if e.file_type().is_dir() && crate::utils::is_windows_reparse_point(entry_path) {
+                return false;
+            }
+
             // Check exclusions
             if config.is_excluded(entry_path) {
                 return false;
             }
-            
+
             true
-        }) {
+        })
+    {
         match entry {
             Ok(e) => {
                 let entry_path = e.path();
                 let depth = e.depth();
-                
+
                 if e.file_type().is_dir() {
                     // Determine if this is a "parent folder" (milestone)
                     if depth <= PARENT_DEPTH_THRESHOLD {
                         // When we encounter a new parent folder, print summary of previous parent if it had files
                         if let Some(ref prev_parent) = current_parent {
-                            if let Some((file_count, total_size)) = parent_folders.get(prev_parent) {
+                            if let Some((file_count, total_size)) = parent_folders.get(prev_parent)
+                            {
                                 if *file_count > 0 {
                                     // Move to new line and print summary
                                     println!();
-                                    let folder_name = prev_parent.file_name()
+                                    let folder_name = prev_parent
+                                        .file_name()
                                         .and_then(|n| n.to_str())
                                         .map(|s| s.to_string())
                                         .unwrap_or_else(|| prev_parent.display().to_string());
-                                    println!("✓ Scanned {}: {} files, {}", 
+                                    println!(
+                                        "✓ Scanned {}: {} files, {}",
                                         folder_name,
                                         file_count,
                                         bytesize::to_string(*total_size, true)
@@ -532,13 +639,14 @@ fn perform_full_disk_traversal_cli_grouped(
                                 }
                             }
                         }
-                        
+
                         // Start new parent folder
                         current_parent = Some(entry_path.to_path_buf());
                         parent_folders.insert(entry_path.to_path_buf(), (0, 0));
-                        
+
                         // Print "Scanning {folder}" on single line
-                        let folder_name = entry_path.file_name()
+                        let folder_name = entry_path
+                            .file_name()
                             .and_then(|n| n.to_str())
                             .map(|s| s.to_string())
                             .unwrap_or_else(|| entry_path.display().to_string());
@@ -550,16 +658,17 @@ fn perform_full_disk_traversal_cli_grouped(
                     // Add file to current parent folder
                     if let Some(ref parent) = current_parent {
                         let (count, size) = parent_folders.entry(parent.clone()).or_insert((0, 0));
-                        
+
                         // Get file size
                         if let Ok(metadata) = std::fs::metadata(entry_path) {
                             let file_size = metadata.len();
                             *count += 1;
                             *size += file_size;
-                            
+
                             // Update display with file name (throttled)
                             if last_update.elapsed().as_millis() >= UPDATE_INTERVAL_MS as u128 {
-                                let file_name = entry_path.file_name()
+                                let file_name = entry_path
+                                    .file_name()
                                     .and_then(|n| n.to_str())
                                     .map(|s| s.to_string())
                                     .unwrap_or_else(|| entry_path.display().to_string());
@@ -570,22 +679,31 @@ fn perform_full_disk_traversal_cli_grouped(
                             }
                         }
                     }
-                    
+
                     // Create file signature (no hash for first scan - too slow)
-                    if let Ok(sig) = crate::scan_cache::FileSignature::from_path(entry_path, false) {
+                    if let Ok(sig) = crate::scan_cache::FileSignature::from_path(entry_path, false)
+                    {
                         // Use "baseline" as category for first scan files
                         let mut updates = cache_updates.lock().unwrap();
                         updates.push((sig, "baseline".to_string()));
-                        
+
                         // Batch update cache periodically
                         if updates.len() >= BATCH_SIZE {
                             let batch = updates.drain(..).collect::<Vec<_>>();
                             if let Err(e) = scan_cache.upsert_files_batch(&batch, scan_id) {
                                 eprintln!("\nWarning: Failed to update cache batch: {}", e);
                             }
+                            // Light throttling: smooth CPU spikes around DB flushes.
+                            std::thread::sleep(SLEEP_AFTER_BATCH);
                         }
-                        
-                        files_processed.fetch_add(1, Ordering::Relaxed);
+
+                        let processed = files_processed.fetch_add(1, Ordering::Relaxed) + 1;
+                        if processed % YIELD_EVERY_FILES == 0
+                            && last_yield.elapsed() >= Duration::from_millis(50)
+                        {
+                            std::thread::yield_now();
+                            last_yield = Instant::now();
+                        }
                     }
                 }
             }
@@ -594,18 +712,20 @@ fn perform_full_disk_traversal_cli_grouped(
             }
         }
     }
-    
+
     // Print final parent folder summary
     if let Some(ref parent) = current_parent {
         if let Some((file_count, total_size)) = parent_folders.get(parent) {
             if *file_count > 0 {
                 // Move to new line and print summary
                 println!();
-                let folder_name = parent.file_name()
+                let folder_name = parent
+                    .file_name()
                     .and_then(|n| n.to_str())
                     .map(|s| s.to_string())
                     .unwrap_or_else(|| parent.display().to_string());
-                println!("✓ Scanned {}: {} files, {}", 
+                println!(
+                    "✓ Scanned {}: {} files, {}",
                     folder_name,
                     file_count,
                     bytesize::to_string(*total_size, true)
@@ -613,17 +733,18 @@ fn perform_full_disk_traversal_cli_grouped(
             }
         }
     }
-    
+
     // Clear the progress line
     print_line("");
     println!();
-    
+
     // Flush remaining cache updates
     let remaining = cache_updates.into_inner().unwrap();
     if !remaining.is_empty() {
         scan_cache.upsert_files_batch(&remaining, scan_id)?;
+        std::thread::sleep(SLEEP_AFTER_BATCH);
     }
-    
+
     Ok(())
 }
 
@@ -635,14 +756,19 @@ fn perform_full_disk_traversal(
     scan_cache: &mut ScanCache,
     scan_id: i64,
 ) -> Result<()> {
-    use walkdir::WalkDir;
     use std::time::{Duration, Instant};
-    
+    use walkdir::WalkDir;
+
     let mut cache_updates: Vec<(crate::scan_cache::FileSignature, String)> = Vec::new();
-    const BATCH_SIZE: usize = 1000; // Batch cache updates for efficiency
-    const EVENT_INTERVAL: Duration = Duration::from_millis(50); // Throttle UI events (huge win on large scans)
+    // Smaller batches smooth out CPU/disk spikes (lighter on the device).
+    const BATCH_SIZE: usize = 500;
+    const EVENT_INTERVAL: Duration = Duration::from_millis(100); // Throttle UI events (reduced overhead for large scans)
+    const YIELD_EVERY_FILES: u64 = 10_000;
+    const SLEEP_AFTER_BATCH: Duration = Duration::from_millis(5);
     let mut last_event = Instant::now();
-    
+    let mut processed_files: u64 = 0;
+    let mut last_yield = Instant::now();
+
     // Use walkdir (sequential) for TUI to avoid lifetime issues
     for entry in WalkDir::new(root_path)
         .max_depth(20) // Reasonable depth limit
@@ -650,28 +776,34 @@ fn perform_full_disk_traversal(
         .into_iter()
         .filter_entry(|e| {
             let entry_path = e.path();
-            
+
             // Skip system paths
             if crate::utils::is_system_path(entry_path) {
                 return false;
             }
-            
-            // Skip symlinks and reparse points
-            if e.file_type().is_symlink() || crate::utils::is_windows_reparse_point(entry_path) {
+
+            // Skip symlinks
+            if e.file_type().is_symlink() {
                 return false;
             }
-            
+
+            // Only check reparse points for directories (optimization: skip syscall for files)
+            if e.file_type().is_dir() && crate::utils::is_windows_reparse_point(entry_path) {
+                return false;
+            }
+
             // Check exclusions
             if config.is_excluded(entry_path) {
                 return false;
             }
-            
+
             true
-        }) {
+        })
+    {
         match entry {
             Ok(e) => {
                 let entry_path = e.path();
-                
+
                 if e.file_type().is_dir() {
                     // Emit folder reading event (throttled)
                     if last_event.elapsed() >= EVENT_INTERVAL {
@@ -688,18 +820,29 @@ fn perform_full_disk_traversal(
                         });
                         last_event = Instant::now();
                     }
-                    
+
                     // Create file signature (no hash for first scan - too slow)
-                    if let Ok(sig) = crate::scan_cache::FileSignature::from_path(entry_path, false) {
+                    if let Ok(sig) = crate::scan_cache::FileSignature::from_path(entry_path, false)
+                    {
                         // Use "baseline" as category for first scan files
                         cache_updates.push((sig, "baseline".to_string()));
-                        
+
                         // Batch update cache periodically
                         if cache_updates.len() >= BATCH_SIZE {
                             let batch = cache_updates.drain(..).collect::<Vec<_>>();
                             if let Err(e) = scan_cache.upsert_files_batch(&batch, scan_id) {
                                 eprintln!("Warning: Failed to update cache batch: {}", e);
                             }
+                            // Light throttling: smooth CPU spikes around DB flushes.
+                            std::thread::sleep(SLEEP_AFTER_BATCH);
+                        }
+
+                        processed_files += 1;
+                        if processed_files % YIELD_EVERY_FILES == 0
+                            && last_yield.elapsed() >= Duration::from_millis(50)
+                        {
+                            std::thread::yield_now();
+                            last_yield = Instant::now();
                         }
                     }
                 }
@@ -709,12 +852,13 @@ fn perform_full_disk_traversal(
             }
         }
     }
-    
+
     // Flush remaining cache updates
     if !cache_updates.is_empty() {
         scan_cache.upsert_files_batch(&cache_updates, scan_id)?;
+        std::thread::sleep(SLEEP_AFTER_BATCH);
     }
-    
+
     Ok(())
 }
 
@@ -856,11 +1000,11 @@ pub fn scan_all_with_progress(
     } else {
         false
     };
-    
+
     // Start scan session if cache is enabled
     let mut scan_id: Option<i64> = None;
-    let mut cache_enabled = scan_cache.is_some() && config.cache.enabled;
-    
+    let cache_enabled = scan_cache.is_some() && config.cache.enabled;
+
     if let Some(cache) = scan_cache.as_mut() {
         if cache_enabled {
             let categories: Vec<&str> = enabled.iter().map(|job| job.key).collect();
@@ -869,19 +1013,23 @@ pub fn scan_all_with_progress(
                 Ok(id) => scan_id = Some(id),
                 Err(e) => {
                     eprintln!("Warning: Failed to start scan cache session: {}. Continuing without cache.", e);
-                    cache_enabled = false;
+                    // Cache error - will continue without cache
                 }
             }
         }
     }
-    
-    // On first scan, perform full disk traversal to build baseline BEFORE category scans
-    if is_first_scan {
+
+    // On first scan, optionally perform full disk traversal to build baseline BEFORE category scans
+    // (disabled by default; enable via config.cache.full_disk_baseline).
+    if is_first_scan && config.cache.full_disk_baseline {
         if let Some(cache) = scan_cache.as_mut() {
             if let Some(id) = scan_id {
                 // Perform full disk traversal with progress reporting
                 if let Err(e) = perform_full_disk_traversal(path, config, tx, cache, id) {
-                    eprintln!("Warning: Full disk traversal failed: {}. Continuing with category scans.", e);
+                    eprintln!(
+                        "Warning: Full disk traversal failed: {}. Continuing with category scans.",
+                        e
+                    );
                 }
             }
         }
@@ -951,10 +1099,7 @@ pub fn scan_all_with_progress(
                     send_started();
                     categories::system::scan(&path_owned, config)
                 }
-                ScanTask::Empty => {
-                    send_started();
-                    categories::empty::scan(&path_owned, config)
-                }
+                ScanTask::Empty => categories::empty::scan_with_progress(&path_owned, config, tx),
                 ScanTask::Duplicates => {
                     send_started();
                     match categories::duplicates::scan_with_config(
@@ -1035,9 +1180,56 @@ pub fn scan_all_with_progress(
 
     filter_exclusions(&mut results, config);
 
-    // Finish scan session if cache is enabled (non-fatal if it fails)
+    // Save scanned files to cache and finish scan session if cache is enabled (non-fatal if it fails)
     if let Some(cache) = scan_cache.as_mut() {
-        if let Some(scan_id) = cache.current_scan_id() {
+        if let Some(scan_session_id) = cache.current_scan_id() {
+            // Save all scanned files to cache using per-category scan IDs
+            // Group files by category and save each group with its category-specific scan ID
+            let mut category_batches: std::collections::HashMap<
+                String,
+                Vec<(FileSignature, String)>,
+            > = std::collections::HashMap::new();
+
+            // Helper to add paths from a category result
+            let mut add_category_paths = |paths: &[PathBuf], category: &str| {
+                for path in paths {
+                    if let Ok(sig) = FileSignature::from_path(path, false) {
+                        category_batches
+                            .entry(category.to_string())
+                            .or_insert_with(Vec::new)
+                            .push((sig, category.to_string()));
+                    }
+                }
+            };
+
+            add_category_paths(&results.cache.paths, "cache");
+            add_category_paths(&results.app_cache.paths, "app_cache");
+            add_category_paths(&results.temp.paths, "temp");
+            add_category_paths(&results.trash.paths, "trash");
+            add_category_paths(&results.build.paths, "build");
+            add_category_paths(&results.downloads.paths, "downloads");
+            add_category_paths(&results.large.paths, "large");
+            add_category_paths(&results.old.paths, "old");
+            add_category_paths(&results.browser.paths, "browser");
+            add_category_paths(&results.system.paths, "system");
+            add_category_paths(&results.empty.paths, "empty");
+            add_category_paths(&results.duplicates.paths, "duplicates");
+            add_category_paths(&results.applications.paths, "applications");
+            add_category_paths(&results.windows_update.paths, "windows_update");
+            add_category_paths(&results.event_logs.paths, "event_logs");
+
+            // Save each category's files with its category-specific scan ID
+            for (category, files) in category_batches {
+                if !files.is_empty() {
+                    // Get category scan ID (increments if category was scanned before)
+                    if let Ok(category_scan_id) =
+                        cache.get_category_scan_id(&category, scan_session_id)
+                    {
+                        let _ = cache.upsert_files_batch(&files, category_scan_id);
+                    }
+                }
+            }
+
             let mut stats = ScanStats::default();
             stats.total_files = results.cache.items
                 + results.app_cache.items
@@ -1056,9 +1248,9 @@ pub fn scan_all_with_progress(
                 + results.event_logs.items;
 
             // Cleanup and finish are non-fatal - scan already completed
-            let removed = cache.cleanup_stale(scan_id).unwrap_or(0);
+            let removed = cache.cleanup_stale(scan_session_id).unwrap_or(0);
             stats.removed_files = removed;
-            let _ = cache.finish_scan(scan_id, stats);
+            let _ = cache.finish_scan(scan_session_id, stats);
         }
     }
 
@@ -1227,7 +1419,7 @@ mod tests {
         let config = Config::default();
 
         // Use Quiet mode in tests to avoid spinner thread issues
-        let results = scan_all(temp_dir.path(), options, OutputMode::Quiet, &config).unwrap();
+        let results = scan_all(temp_dir.path(), options, OutputMode::Quiet, &config, None).unwrap();
 
         assert_eq!(results.cache.items, 0);
         assert_eq!(results.temp.items, 0);

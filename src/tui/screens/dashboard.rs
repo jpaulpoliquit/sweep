@@ -89,11 +89,7 @@ fn render_actions(f: &mut Frame, area: Rect, app_state: &AppState) {
 
     let border_style = Styles::border();
 
-    let title = if app_state.focus_actions {
-        "ACTIONS"
-    } else {
-        "Actions"
-    };
+    let title = "Actions";
 
     // Adaptive padding based on screen size
     let padding = if area.width < 30 {
@@ -116,23 +112,29 @@ fn render_actions(f: &mut Frame, area: Rect, app_state: &AppState) {
 }
 
 fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bool) {
-    // Single column layout - flow vertically, no columns
-    // Use Min to ensure all actions are visible - each action is 2 lines, 4 actions = 8 lines + title + borders
+    // Single column layout - flow vertically, no columns.
+    //
+    // IMPORTANT: reserve real space for the Categories list. Previously, the Actions section
+    // could consume almost the entire viewport on smaller terminals, making Categories appear
+    // "empty"/broken.
+    let min_categories_height: u16 = if area.height < 24 { 10 } else { 14 };
+    // Calculate exact height needed for actions: 1 (title) + 14 (7 actions × 2 lines + borders/padding)
+    let actions_height: u16 = 15; // Fixed compact height to maximize space for categories
+
     let chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Min(12), // Actions section - enough space for all 4 actions with spacing
-            Constraint::Min(0),  // Categories (flexible, uses remaining space)
+            Constraint::Length(actions_height), // Actions section (fixed height)
+            Constraint::Min(min_categories_height), // Categories (always visible)
         ])
         .split(area);
 
-    // Actions section with proper spacing
+    // Actions section with minimal spacing
     let action_chunks = Layout::default()
         .direction(Direction::Vertical)
         .constraints([
-            Constraint::Length(1), // Title
-            Constraint::Length(1), // Spacing
-            Constraint::Min(14),   // Actions list - enough for all 6 actions (each is 2 lines)
+            Constraint::Length(1),  // Title
+            Constraint::Length(14), // Actions list - exactly 14 lines (7 actions × 2 lines + borders/padding)
         ])
         .split(chunks[0]);
 
@@ -150,7 +152,7 @@ fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bo
         .alignment(ratatui::layout::Alignment::Left);
     f.render_widget(title, action_chunks[0]);
 
-    render_actions(f, action_chunks[2], app_state);
+    render_actions(f, action_chunks[1], app_state);
 
     // Categories section with proper spacing
     let category_chunks = Layout::default()
@@ -208,6 +210,10 @@ fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bo
                 cat.description.clone()
             };
 
+            // Make description less prominent than the category name
+            // Use default style (no modifiers) to ensure it's less vibrant than the name
+            let desc_style = Style::default();
+
             let line = Line::from(vec![
                 Span::styled(prefix, name_style),
                 Span::styled("[", bracket_style),
@@ -216,7 +222,7 @@ fn render_content(f: &mut Frame, area: Rect, app_state: &AppState, _is_small: bo
                 Span::raw(" "),
                 Span::styled(&cat.name, name_style),
                 Span::raw("  "),
-                Span::styled(desc_text, Styles::secondary()),
+                Span::styled(desc_text, desc_style),
             ]);
 
             ListItem::new(line)

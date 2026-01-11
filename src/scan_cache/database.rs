@@ -1,7 +1,7 @@
 //! SQLite database operations for scan cache
 
-use crate::scan_cache::signature::{FileSignature, FileStatus};
 use crate::scan_cache::session::{ScanSession, ScanStats};
+use crate::scan_cache::signature::{FileSignature, FileStatus};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
 use rusqlite::{params, Connection};
@@ -11,7 +11,7 @@ use std::io;
 use std::path::{Path, PathBuf};
 use std::time::{SystemTime, UNIX_EPOCH};
 
-const SCHEMA_VERSION: i32 = 1;
+const SCHEMA_VERSION: i32 = 3;
 
 /// Scan cache database
 pub struct ScanCache {
@@ -23,8 +23,9 @@ impl ScanCache {
     /// Open or create the scan cache database
     pub fn open() -> Result<Self> {
         let cache_dir = get_cache_dir()?;
-        std::fs::create_dir_all(&cache_dir)
-            .with_context(|| format!("Failed to create cache directory: {}", cache_dir.display()))?;
+        std::fs::create_dir_all(&cache_dir).with_context(|| {
+            format!("Failed to create cache directory: {}", cache_dir.display())
+        })?;
 
         let db_path = cache_dir.join("scan_cache.db");
 
@@ -66,6 +67,20 @@ impl ScanCache {
         db.busy_timeout(std::time::Duration::from_secs(30))
             .with_context(|| "Failed to set busy timeout")?;
 
+        // Performance optimizations for rebuildable cache
+        // NORMAL synchronous mode: faster than FULL, still safe (WAL provides durability)
+        db.pragma_update(None, "synchronous", "NORMAL")
+            .with_context(|| "Failed to set synchronous mode")?;
+
+        // Store temporary tables/indexes in memory for faster operations
+        db.pragma_update(None, "temp_store", "MEMORY")
+            .with_context(|| "Failed to set temp_store")?;
+
+        // Increase cache size to 64MB for better performance (default is 2MB)
+        // This is safe for a rebuildable cache
+        db.pragma_update(None, "cache_size", "-16384") // Negative value = KB, so -16384 = 16MB
+            .with_context(|| "Failed to set cache_size")?;
+
         Ok(db)
     }
 
@@ -90,7 +105,10 @@ impl ScanCache {
                         err
                     );
                 } else if let Err(err) = std::fs::remove_file(db_path) {
-                    eprintln!("Warning: Failed to remove corrupted cache database: {}", err);
+                    eprintln!(
+                        "Warning: Failed to remove corrupted cache database: {}",
+                        err
+                    );
                 }
             }
 
@@ -115,18 +133,17 @@ impl ScanCache {
         // Check if schema_version table exists
         let version: i32 = self
             .db
-            .query_row(
-                "SELECT version FROM schema_version LIMIT 1",
-                [],
-                |row| row.get(0),
-            )
+            .query_row("SELECT version FROM schema_version LIMIT 1", [], |row| {
+                row.get(0)
+            })
             .or_else(|_| {
                 // Table doesn't exist, create it and return version 0
                 self.db.execute(
                     "CREATE TABLE IF NOT EXISTS schema_version (version INTEGER NOT NULL)",
                     [],
                 )?;
-                self.db.execute("INSERT INTO schema_version (version) VALUES (0)", [])?;
+                self.db
+                    .execute("INSERT INTO schema_version (version) VALUES (0)", [])?;
                 Ok::<i32, rusqlite::Error>(0)
             })?;
 
@@ -140,7 +157,9 @@ impl ScanCache {
     /// Migrate schema to current version
     fn migrate_schema(&mut self, from_version: i32) -> Result<()> {
         // Use transaction to ensure atomic migration
-        let tx = self.db.transaction()
+        let tx = self
+            .db
+            .transaction()
             .with_context(|| "Failed to start migration transaction")?;
 
         if from_version == 0 {
@@ -195,6 +214,90 @@ impl ScanCache {
             .with_context(|| "Failed to create size index")?;
 
             // Update schema version
+            tx.execute("UPDATE schema_version SET version = ?1", [1])
+                .with_context(|| "Failed to update schema version")?;
+        }
+
+        if from_version == 1 {
+            // Migration to version 2: Add per-category scan IDs
+            // Create category_scans table to track scan IDs per category
+            tx.execute(
+                "CREATE TABLE IF NOT EXISTS category_scans (
+                    category TEXT PRIMARY KEY,
+                    scan_id INTEGER NOT NULL DEFAULT 0,
+                    last_scan_session_id INTEGER,
+                    last_updated INTEGER NOT NULL
+                )",
+                [],
+            )
+            .with_context(|| "Failed to create category_scans table")?;
+
+            // Migrate existing data: create category scan IDs from existing file_records
+            // For each category, find the max last_scan_id used and set that as the category scan_id
+            tx.execute(
+                "INSERT INTO category_scans (category, scan_id, last_updated)
+                 SELECT category, MAX(last_scan_id), MAX(updated_at)
+                 FROM file_records
+                 GROUP BY category
+                 ON CONFLICT(category) DO NOTHING",
+                [],
+            )
+            .with_context(|| "Failed to migrate category scan IDs")?;
+
+            // Create index for category_scans
+            tx.execute(
+                "CREATE INDEX IF NOT EXISTS idx_category_scans_category ON category_scans(category)",
+                [],
+            )
+            .with_context(|| "Failed to create category_scans index")?;
+
+            // Update schema version
+            tx.execute("UPDATE schema_version SET version = ?1", [2])
+                .with_context(|| "Failed to update schema version")?;
+        }
+
+        if from_version == 2 {
+            // Migration to version 3: Add file_categories junction table to support multiple categories per file
+            // Create file_categories table to track which categories each file belongs to
+            tx.execute(
+                "CREATE TABLE IF NOT EXISTS file_categories (
+                    path TEXT NOT NULL,
+                    category TEXT NOT NULL,
+                    category_scan_id INTEGER NOT NULL,
+                    PRIMARY KEY (path, category),
+                    FOREIGN KEY (path) REFERENCES file_records(path) ON DELETE CASCADE
+                )",
+                [],
+            )
+            .with_context(|| "Failed to create file_categories table")?;
+
+            // Migrate existing data: create file_categories entries from file_records
+            // Use the last_scan_id from file_records as the category_scan_id
+            // Note: This assumes files were stored with per-category scan IDs (from version 2)
+            // For files that might have been stored before version 2, we'll use the last_scan_id
+            tx.execute(
+                "INSERT INTO file_categories (path, category, category_scan_id)
+                 SELECT path, category, last_scan_id
+                 FROM file_records
+                 WHERE category IS NOT NULL
+                 ON CONFLICT(path, category) DO NOTHING",
+                [],
+            )
+            .with_context(|| "Failed to migrate file_categories data")?;
+
+            // Create indexes for file_categories
+            tx.execute(
+                "CREATE INDEX IF NOT EXISTS idx_file_categories_category ON file_categories(category, category_scan_id)",
+                [],
+            )
+            .with_context(|| "Failed to create file_categories category index")?;
+            tx.execute(
+                "CREATE INDEX IF NOT EXISTS idx_file_categories_path ON file_categories(path)",
+                [],
+            )
+            .with_context(|| "Failed to create file_categories path index")?;
+
+            // Update schema version
             tx.execute("UPDATE schema_version SET version = ?1", [SCHEMA_VERSION])
                 .with_context(|| "Failed to update schema version")?;
         }
@@ -225,11 +328,14 @@ impl ScanCache {
     pub fn check_file(&self, path: &Path) -> Result<FileStatus> {
         let path_str = normalize_path(path);
 
-        let result: Option<(i64, i64, i64)> = self.db.query_row(
-            "SELECT size, mtime_secs, mtime_nsecs FROM file_records WHERE path = ?1",
-            [&path_str],
-            |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
-        ).ok();
+        let result: Option<(i64, i64, i64)> = self
+            .db
+            .query_row(
+                "SELECT size, mtime_secs, mtime_nsecs FROM file_records WHERE path = ?1",
+                [&path_str],
+                |row| Ok((row.get(0)?, row.get(1)?, row.get(2)?)),
+            )
+            .ok();
 
         let Some((cached_size, mtime_secs, mtime_nsecs)) = result else {
             return Ok(FileStatus::New);
@@ -256,7 +362,8 @@ impl ScanCache {
         let (current_secs, current_nsecs) = system_time_to_secs_nsecs(current_mtime);
 
         // Compare signatures
-        if current_size != cached_size || current_secs != mtime_secs || current_nsecs != mtime_nsecs {
+        if current_size != cached_size || current_secs != mtime_secs || current_nsecs != mtime_nsecs
+        {
             Ok(FileStatus::Modified)
         } else {
             Ok(FileStatus::Unchanged)
@@ -290,15 +397,16 @@ impl ScanCache {
                 query_params.push(s);
             }
 
-            let rows = stmt.query_map(
-                rusqlite::params_from_iter(query_params),
-                |row| {
-                    Ok((
-                        row.get::<_, String>(0)?,
-                        (row.get::<_, i64>(1)?, row.get::<_, i64>(2)?, row.get::<_, i64>(3)?),
-                    ))
-                },
-            )?;
+            let rows = stmt.query_map(rusqlite::params_from_iter(query_params), |row| {
+                Ok((
+                    row.get::<_, String>(0)?,
+                    (
+                        row.get::<_, i64>(1)?,
+                        row.get::<_, i64>(2)?,
+                        row.get::<_, i64>(3)?,
+                    ),
+                ))
+            })?;
 
             for row in rows {
                 let (path, values) = row?;
@@ -370,6 +478,7 @@ impl ScanCache {
         // SQLite INTEGER can store up to 8 bytes, so i64::MAX is safe
         let size_i64 = clamp_size_to_i64(sig.size);
 
+        // Insert/update file record (file metadata) - don't overwrite category on conflict
         self.db.execute(
             "INSERT INTO file_records (path, size, mtime_secs, mtime_nsecs, content_hash, category, last_scan_id, created_at, updated_at)
              VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
@@ -378,7 +487,6 @@ impl ScanCache {
                 mtime_secs = ?3,
                 mtime_nsecs = ?4,
                 content_hash = ?5,
-                category = ?6,
                 last_scan_id = ?7,
                 updated_at = ?9",
             params![
@@ -394,6 +502,16 @@ impl ScanCache {
             ],
         )?;
 
+        // Insert/update file_categories junction table (category membership)
+        // This allows files to belong to multiple categories
+        self.db.execute(
+            "INSERT INTO file_categories (path, category, category_scan_id)
+             VALUES (?1, ?2, ?3)
+             ON CONFLICT(path, category) DO UPDATE SET
+                category_scan_id = ?3",
+            params![path_str, category, scan_id],
+        )?;
+
         Ok(())
     }
 
@@ -407,18 +525,18 @@ impl ScanCache {
             return Ok(());
         }
 
-        let tx = self.db.transaction()
+        let tx = self
+            .db
+            .transaction()
             .with_context(|| "Failed to start transaction")?;
 
-        for (sig, category) in records {
-            let path_str = normalize_path(&sig.path);
-            let (mtime_secs, mtime_nsecs) = system_time_to_secs_nsecs(sig.mtime);
-            let now = Utc::now().timestamp();
+        // Calculate timestamp once outside the loop
+        let now = Utc::now().timestamp();
 
-            // Handle potential integer overflow for very large files
-            let size_i64 = clamp_size_to_i64(sig.size);
-
-            if let Err(e) = tx.execute(
+        // Prepare statements once per batch for better performance
+        {
+            // Statement for file_records - don't overwrite category on conflict to preserve multi-category support
+            let mut file_stmt = tx.prepare_cached(
                 "INSERT INTO file_records (path, size, mtime_secs, mtime_nsecs, content_hash, category, last_scan_id, created_at, updated_at)
                  VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9)
                  ON CONFLICT(path) DO UPDATE SET
@@ -426,10 +544,27 @@ impl ScanCache {
                     mtime_secs = ?3,
                     mtime_nsecs = ?4,
                     content_hash = ?5,
-                    category = ?6,
                     last_scan_id = ?7,
-                    updated_at = ?9",
-                params![
+                    updated_at = ?9"
+            )?;
+
+            // Statement for file_categories - tracks which categories each file belongs to
+            let mut category_stmt = tx.prepare_cached(
+                "INSERT INTO file_categories (path, category, category_scan_id)
+                 VALUES (?1, ?2, ?3)
+                 ON CONFLICT(path, category) DO UPDATE SET
+                    category_scan_id = ?3",
+            )?;
+
+            for (sig, category) in records {
+                let path_str = normalize_path(&sig.path);
+                let (mtime_secs, mtime_nsecs) = system_time_to_secs_nsecs(sig.mtime);
+
+                // Handle potential integer overflow for very large files
+                let size_i64 = clamp_size_to_i64(sig.size);
+
+                // Upsert file record (metadata only, category not overwritten on conflict)
+                if let Err(e) = file_stmt.execute(params![
                     path_str,
                     size_i64,
                     mtime_secs,
@@ -439,12 +574,18 @@ impl ScanCache {
                     scan_id,
                     now,
                     now
-                ],
-            ) {
-                // Transaction will be rolled back automatically on drop
-                return Err(anyhow::anyhow!("Failed to upsert file record: {}", e));
+                ]) {
+                    // Transaction will be rolled back automatically on drop
+                    return Err(anyhow::anyhow!("Failed to upsert file record: {}", e));
+                }
+
+                // Upsert file_categories to track this file belongs to this category
+                if let Err(e) = category_stmt.execute(params![path_str, category, scan_id]) {
+                    // Transaction will be rolled back automatically on drop
+                    return Err(anyhow::anyhow!("Failed to upsert file category: {}", e));
+                }
             }
-        }
+        } // Drop stmts here so tx can be moved
 
         tx.commit()
             .with_context(|| "Failed to commit transaction")?;
@@ -452,16 +593,31 @@ impl ScanCache {
     }
 
     /// Get cached results for a category (unchanged files from previous scan)
-    pub fn get_cached_category(&self, category: &str, previous_scan_id: i64) -> Result<Vec<PathBuf>> {
+    /// Uses category-specific scan ID
+    pub fn get_cached_category(
+        &self,
+        category: &str,
+        category_scan_id: i64,
+    ) -> Result<Vec<PathBuf>> {
+        // Query from file_categories junction table (schema v3+)
+        // Falls back to file_records for backward compatibility
         let mut stmt = self.db.prepare(
-            "SELECT path FROM file_records WHERE category = ?1 AND last_scan_id = ?2",
+            "SELECT fc.path FROM file_categories fc
+             WHERE fc.category = ?1 AND fc.category_scan_id = ?2
+             UNION
+             SELECT fr.path FROM file_records fr
+             WHERE fr.category = ?1 AND fr.last_scan_id = ?2
+             AND NOT EXISTS (
+                 SELECT 1 FROM file_categories WHERE path = fr.path AND category = ?1
+             )",
         )?;
-        
+
         let mut paths = Vec::new();
-        let rows = stmt.query_map(params![category, previous_scan_id], |row| {
-            Ok(decode_path(&row.get::<_, String>(0)?))
-        })?;
-        
+        let rows = stmt.query_map(
+            params![category, category_scan_id, category, category_scan_id],
+            |row| Ok(decode_path(&row.get::<_, String>(0)?)),
+        )?;
+
         for row in rows {
             paths.push(row?);
         }
@@ -470,79 +626,125 @@ impl ScanCache {
     }
 
     /// Remove entries for deleted files (files that were in cache but no longer exist)
-    pub fn cleanup_stale(&mut self, current_scan_id: i64) -> Result<usize> {
-        // Get all paths that weren't updated in current scan (they might be deleted)
-        // We only check paths from the most recent previous scan to avoid checking everything
-        let previous_scan_id: Option<i64> = {
-            let mut stmt = self.db.prepare(
-                "SELECT MAX(id) FROM scan_sessions WHERE id < ?1",
-            )?;
-            stmt.query_row([current_scan_id], |row| row.get(0)).ok()
-        };
-        
-        if previous_scan_id.is_none() {
-            return Ok(0); // No previous scan
-        }
-        
-        let prev_id = previous_scan_id.unwrap();
-        
-        // Get paths from previous scan that weren't updated in current scan
-        let paths: Vec<String> = {
-            let mut stmt = self.db.prepare(
-                "SELECT path FROM file_records WHERE last_scan_id = ?1",
-            )?;
-            
-            let mut paths = Vec::new();
-            let rows = stmt.query_map([prev_id], |row| Ok(row.get::<_, String>(0)?))?;
-            
+    /// With per-category scan IDs, we check each category's previous scan
+    pub fn cleanup_stale(&mut self, _current_scan_session_id: i64) -> Result<usize> {
+        // Get all categories that have been scanned
+        let categories: Vec<String> = {
+            let mut stmt = self.db.prepare("SELECT category FROM category_scans")?;
+            let mut categories = Vec::new();
+            let rows = stmt.query_map([], |row| Ok(row.get::<_, String>(0)?))?;
             for row in rows {
-                paths.push(row?);
+                categories.push(row?);
             }
-            paths
+            categories
         };
 
-        if paths.is_empty() {
+        if categories.is_empty() {
             return Ok(0);
         }
 
-        // Check which paths are deleted (outside transaction for efficiency)
-        let mut deleted_paths = Vec::new();
-        for path_str in paths {
-            let path = decode_path(&path_str);
-            // Use exists() check - if file doesn't exist, mark for deletion
-            match std::fs::metadata(&path) {
-                Ok(_) => {}
-                Err(err) => {
-                    if err.kind() == io::ErrorKind::NotFound {
-                        deleted_paths.push(path_str);
+        let mut total_deleted = 0;
+
+        // For each category, check files from its previous scan
+        for category in categories {
+            // Get the current category scan ID
+            let current_category_scan_id: Option<i64> = self
+                .db
+                .query_row(
+                    "SELECT scan_id FROM category_scans WHERE category = ?1",
+                    [&category],
+                    |row| row.get(0),
+                )
+                .ok();
+
+            if let Some(current_id) = current_category_scan_id {
+                if current_id <= 1 {
+                    continue; // First scan, nothing to clean up
+                }
+
+                let previous_category_scan_id = current_id - 1;
+
+                // Get paths from previous category scan using file_categories table
+                let paths: Vec<String> = {
+                    let mut stmt = self
+                        .db
+                        .prepare("SELECT path FROM file_categories WHERE category = ?1 AND category_scan_id = ?2")?;
+
+                    let mut paths = Vec::new();
+                    let rows = stmt
+                        .query_map(params![&category, previous_category_scan_id], |row| {
+                            Ok(row.get::<_, String>(0)?)
+                        })?;
+
+                    for row in rows {
+                        paths.push(row?);
                     }
+                    paths
+                };
+
+                if paths.is_empty() {
+                    continue;
+                }
+
+                // Check which paths are deleted
+                let mut deleted_paths = Vec::new();
+                for path_str in paths {
+                    let path = decode_path(&path_str);
+                    match std::fs::metadata(&path) {
+                        Ok(_) => {}
+                        Err(err) => {
+                            if err.kind() == io::ErrorKind::NotFound {
+                                deleted_paths.push(path_str);
+                            }
+                        }
+                    }
+                }
+
+                if !deleted_paths.is_empty() {
+                    // Batch delete in a transaction
+                    let tx = self
+                        .db
+                        .transaction()
+                        .with_context(|| "Failed to start cleanup transaction")?;
+
+                    // Delete from file_categories for this category
+                    let mut delete_category_stmt = tx
+                        .prepare("DELETE FROM file_categories WHERE path = ?1 AND category = ?2")?;
+                    for path_str in &deleted_paths {
+                        if let Err(e) = delete_category_stmt.execute([path_str, &category]) {
+                            return Err(anyhow::anyhow!(
+                                "Failed to delete stale category record: {}",
+                                e
+                            ));
+                        }
+                    }
+                    drop(delete_category_stmt);
+
+                    // Delete from file_records only if file has no remaining categories
+                    // (file might be in multiple categories, so only delete if it's not in any category)
+                    let mut delete_file_stmt = tx.prepare(
+                        "DELETE FROM file_records 
+                         WHERE path = ?1 
+                         AND NOT EXISTS (SELECT 1 FROM file_categories WHERE file_categories.path = file_records.path)"
+                    )?;
+                    for path_str in &deleted_paths {
+                        if let Err(e) = delete_file_stmt.execute([path_str]) {
+                            return Err(anyhow::anyhow!(
+                                "Failed to delete stale file record: {}",
+                                e
+                            ));
+                        }
+                    }
+                    drop(delete_file_stmt);
+
+                    total_deleted += deleted_paths.len();
+                    tx.commit()
+                        .with_context(|| "Failed to commit cleanup transaction")?;
                 }
             }
         }
 
-        if deleted_paths.is_empty() {
-            return Ok(0);
-        }
-
-        // Batch deletions in a transaction for efficiency
-        let tx = self.db.transaction()
-            .with_context(|| "Failed to start cleanup transaction")?;
-        
-        // Batch delete in transaction
-        let mut delete_stmt = tx.prepare("DELETE FROM file_records WHERE path = ?1")?;
-        for path_str in &deleted_paths {
-            if let Err(e) = delete_stmt.execute([path_str]) {
-                // Transaction will rollback on drop
-                return Err(anyhow::anyhow!("Failed to delete stale record: {}", e));
-            }
-        }
-        drop(delete_stmt);
-
-        let deleted_count = deleted_paths.len();
-        tx.commit()
-            .with_context(|| "Failed to commit cleanup transaction")?;
-
-        Ok(deleted_count)
+        Ok(total_deleted)
     }
 
     /// Finish scan session and cleanup
@@ -582,7 +784,10 @@ impl ScanCache {
                     query_params.push(cat);
                 }
                 self.db.execute(
-                    &format!("DELETE FROM file_records WHERE category IN ({})", placeholders),
+                    &format!(
+                        "DELETE FROM file_records WHERE category IN ({})",
+                        placeholders
+                    ),
                     rusqlite::params_from_iter(query_params),
                 )?;
             }
@@ -607,11 +812,66 @@ impl ScanCache {
 
     /// Get the previous scan ID (for getting cached results)
     pub fn get_previous_scan_id(&self) -> Result<Option<i64>> {
-        let result: Option<i64> = self.db.query_row(
-            "SELECT MAX(id) FROM scan_sessions WHERE finished_at IS NOT NULL",
-            [],
-            |row| row.get(0),
-        ).ok();
+        let result: Option<i64> = self
+            .db
+            .query_row(
+                "SELECT MAX(id) FROM scan_sessions WHERE finished_at IS NOT NULL",
+                [],
+                |row| row.get(0),
+            )
+            .ok();
+        Ok(result)
+    }
+
+    /// Get the current scan ID for a category (increments if needed)
+    /// Returns the scan ID to use for this category scan
+    pub fn get_category_scan_id(&mut self, category: &str, scan_session_id: i64) -> Result<i64> {
+        let now = Utc::now().timestamp();
+
+        // Try to get existing category scan ID
+        let current_scan_id: Option<i64> = self
+            .db
+            .query_row(
+                "SELECT scan_id FROM category_scans WHERE category = ?1",
+                [category],
+                |row| row.get(0),
+            )
+            .ok();
+
+        let category_scan_id = if let Some(id) = current_scan_id {
+            // Category exists, increment scan ID
+            let new_id = id + 1;
+            self.db.execute(
+                "UPDATE category_scans 
+                 SET scan_id = ?1, last_scan_session_id = ?2, last_updated = ?3 
+                 WHERE category = ?4",
+                params![new_id, scan_session_id, now, category],
+            )?;
+            new_id
+        } else {
+            // First scan of this category, start at 1
+            self.db.execute(
+                "INSERT INTO category_scans (category, scan_id, last_scan_session_id, last_updated)
+                 VALUES (?1, 1, ?2, ?3)",
+                params![category, scan_session_id, now],
+            )?;
+            1
+        };
+
+        Ok(category_scan_id)
+    }
+
+    /// Get the previous scan ID for a category (without incrementing)
+    /// Returns None if the category was never scanned before
+    pub fn get_previous_category_scan_id(&self, category: &str) -> Result<Option<i64>> {
+        let result: Option<i64> = self
+            .db
+            .query_row(
+                "SELECT scan_id FROM category_scans WHERE category = ?1",
+                [category],
+                |row| row.get(0),
+            )
+            .ok();
         Ok(result)
     }
 
@@ -664,11 +924,9 @@ impl ScanCache {
 
     /// Get cache statistics: total files and total storage scanned
     pub fn get_cache_stats(&self) -> Result<(usize, u64)> {
-        let total_files: i64 = self.db.query_row(
-            "SELECT COUNT(*) FROM file_records",
-            [],
-            |row| row.get(0),
-        )?;
+        let total_files: i64 =
+            self.db
+                .query_row("SELECT COUNT(*) FROM file_records", [], |row| row.get(0))?;
 
         let total_storage: i64 = self.db.query_row(
             "SELECT COALESCE(SUM(size), 0) FROM file_records",
@@ -705,7 +963,20 @@ fn get_cache_dir() -> Result<PathBuf> {
 fn normalize_path(path: &Path) -> String {
     #[cfg(windows)]
     {
-        path.to_string_lossy().to_lowercase().replace('\\', "/")
+        // Single-pass normalizer: lowercase and convert \ to / in one pass.
+        //
+        // NOTE: use Unicode lowercasing (not ASCII-only) to preserve previous behavior.
+        let path_str = path.to_string_lossy();
+        let mut result = String::with_capacity(path_str.len());
+        for ch in path_str.chars() {
+            if ch == '\\' {
+                result.push('/');
+            } else {
+                // `to_lowercase()` can expand into multiple chars (e.g. ß -> ss).
+                result.extend(ch.to_lowercase());
+            }
+        }
+        result
     }
     #[cfg(not(windows))]
     {
@@ -811,13 +1082,13 @@ mod tests {
     fn test_upsert_file() {
         let (temp_dir, mut cache) = setup_test_cache();
         let scan_id = cache.start_scan("full", &["cache"]).unwrap();
-        
+
         let test_file = temp_dir.path().join("test.txt");
         fs::write(&test_file, "hello").unwrap();
-        
+
         let sig = FileSignature::from_path(&test_file, false).unwrap();
         cache.upsert_file(&sig, "cache", scan_id).unwrap();
-        
+
         // Check that file is in cache
         let status = cache.check_file(&test_file).unwrap();
         assert!(matches!(status, FileStatus::Unchanged));
@@ -826,10 +1097,10 @@ mod tests {
     #[test]
     fn test_check_file_new() {
         let (temp_dir, cache) = setup_test_cache();
-        
+
         let test_file = temp_dir.path().join("new_file.txt");
         fs::write(&test_file, "new content").unwrap();
-        
+
         let status = cache.check_file(&test_file).unwrap();
         assert!(matches!(status, FileStatus::New));
     }
@@ -838,17 +1109,17 @@ mod tests {
     fn test_check_file_modified() {
         let (temp_dir, mut cache) = setup_test_cache();
         let scan_id = cache.start_scan("full", &["cache"]).unwrap();
-        
+
         let test_file = temp_dir.path().join("test.txt");
         fs::write(&test_file, "original").unwrap();
-        
+
         let sig = FileSignature::from_path(&test_file, false).unwrap();
         cache.upsert_file(&sig, "cache", scan_id).unwrap();
-        
+
         // Modify file
         std::thread::sleep(std::time::Duration::from_millis(10));
         fs::write(&test_file, "modified").unwrap();
-        
+
         let status = cache.check_file(&test_file).unwrap();
         assert!(matches!(status, FileStatus::Modified));
     }
@@ -857,16 +1128,16 @@ mod tests {
     fn test_invalidate() {
         let (temp_dir, mut cache) = setup_test_cache();
         let scan_id = cache.start_scan("full", &["cache"]).unwrap();
-        
+
         let test_file = temp_dir.path().join("test.txt");
         fs::write(&test_file, "hello").unwrap();
-        
+
         let sig = FileSignature::from_path(&test_file, false).unwrap();
         cache.upsert_file(&sig, "cache", scan_id).unwrap();
-        
+
         // Invalidate cache
         cache.invalidate(Some(&["cache"])).unwrap();
-        
+
         // File should be gone from cache
         let status = cache.check_file(&test_file).unwrap();
         assert!(matches!(status, FileStatus::New));
