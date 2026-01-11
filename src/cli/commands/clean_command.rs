@@ -148,7 +148,7 @@ pub(crate) fn handle_clean(
         min_size_bytes,
     };
 
-    let results = scanner::scan_all(&scan_path, scan_options.clone(), output_mode, &config)?;
+    let results = scanner::scan_all(&scan_path, scan_options.clone(), output_mode, &config, None)?;
 
     if json {
         output::print_json(&results)?;

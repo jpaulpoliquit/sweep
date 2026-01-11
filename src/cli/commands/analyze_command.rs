@@ -211,6 +211,22 @@ pub(crate) fn handle_analyze(
         // Use config values (after CLI overrides) for scan options
         let min_size_bytes = config.thresholds.min_size_mb * 1024 * 1024;
 
+        // Open scan cache if enabled
+        let use_cache = config.cache.enabled;
+        let mut scan_cache = if use_cache {
+            match crate::scan_cache::ScanCache::open() {
+                Ok(cache) => Some(cache),
+                Err(e) => {
+                    if output_mode != OutputMode::Quiet {
+                        eprintln!("Warning: Failed to open scan cache: {}. Continuing without cache.", e);
+                    }
+                    None
+                }
+            }
+        } else {
+            None
+        };
+
         let results = scanner::scan_all(
             &scan_path,
             ScanOptions {
@@ -235,6 +251,7 @@ pub(crate) fn handle_analyze(
             },
             output_mode,
             &config,
+            scan_cache.as_mut(),
         )?;
 
         // Launch TUI if interactive mode requested

@@ -15,6 +15,7 @@ pub mod output;
 pub mod progress;
 pub mod project;
 pub mod restore;
+pub mod scan_cache;
 pub mod scan_events;
 pub mod scanner;
 pub mod size;

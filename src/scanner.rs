@@ -4,14 +4,152 @@ use crate::config::Config;
 use crate::git;
 use crate::output::{CategoryResult, OutputMode, ScanResults};
 use crate::progress;
+use crate::scan_cache::{FileSignature, ScanCache, ScanStats};
 use crate::scan_events::ScanProgressEvent;
 use crate::theme::Theme;
 use crate::utils;
 use anyhow::Result;
 // use rayon::prelude::*; // Disabled: using sequential scan to avoid thrashing
-use std::path::Path;
+use std::collections::HashSet;
+use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
+
+/// Try incremental scan for a category
+/// Returns Ok(Some(result)) if cache was used, Ok(None) if full scan needed, Err on error
+fn try_incremental_scan(
+    category_name: &str,
+    _task: &ScanTask,
+    _path: &Path,
+    _config: &Config,
+    cache: &mut ScanCache,
+    scan_id: i64,
+    _mode: OutputMode,
+) -> Result<Option<CategoryResult>> {
+    // Get previous scan ID
+    let previous_scan_id = match cache.get_previous_scan_id()? {
+        Some(id) => id,
+        None => return Ok(None), // No previous scan, need full scan
+    };
+
+    // Get cached paths for this category
+    let cached_paths = cache.get_cached_category(category_name, previous_scan_id)?;
+    
+    if cached_paths.is_empty() {
+        return Ok(None); // No cached paths, need full scan
+    }
+
+    // Check which files changed
+    let status_map = cache.check_files_batch(&cached_paths)?;
+    
+    let mut unchanged_paths = HashSet::new();
+    let mut changed_paths = Vec::new();
+    let new_paths: Vec<PathBuf> = Vec::new();
+    
+    for (path, status) in status_map {
+        match status {
+            crate::scan_cache::FileStatus::Unchanged => {
+                unchanged_paths.insert(path);
+            }
+            crate::scan_cache::FileStatus::Modified | crate::scan_cache::FileStatus::New => {
+                changed_paths.push(path);
+            }
+            crate::scan_cache::FileStatus::Deleted => {
+                // File deleted, skip it
+            }
+        }
+    }
+
+    // If most files are unchanged, use cache
+    // Otherwise, do full scan (more efficient than checking many files)
+    let unchanged_ratio = if cached_paths.is_empty() {
+        0.0
+    } else {
+        unchanged_paths.len() as f64 / cached_paths.len() as f64
+    };
+
+    // Only use cache if >50% of files are unchanged
+    if unchanged_ratio < 0.5 {
+        return Ok(None);
+    }
+
+    // Build result from cached paths
+    let mut result = CategoryResult::default();
+    
+    for path in &unchanged_paths {
+        if let Ok(metadata) = std::fs::metadata(path) {
+            result.items += 1;
+            result.size_bytes += metadata.len();
+            result.paths.push(path.clone());
+        }
+    }
+
+    // Update cache with unchanged files
+    for path in &unchanged_paths {
+        if let Ok(sig) = FileSignature::from_path(path, false) {
+            let _ = cache.upsert_file(&sig, category_name, scan_id);
+        }
+    }
+
+    // If there are changed/new files, we'd need to scan them
+    // For now, we'll do a full scan if there are any changes
+    // TODO: In future, could scan only changed files
+    if !changed_paths.is_empty() || !new_paths.is_empty() {
+        // Merge with full scan of changed files
+        // For simplicity, we'll just do full scan if there are changes
+        // This can be optimized later
+        return Ok(None);
+    }
+
+    Ok(Some(result))
+}
+
+/// Execute full category scan
+fn execute_category_scan(
+    _category_name: &str,
+    task: &ScanTask,
+    path: &Path,
+    config: &Config,
+    mode: OutputMode,
+    build_config: &crate::config::CategoryConfig,
+    duplicates_config: &crate::config::DuplicatesConfig,
+    duplicate_groups: &std::cell::RefCell<Option<Vec<crate::categories::duplicates::DuplicateGroup>>>,
+) -> Result<CategoryResult> {
+    match task {
+        ScanTask::Cache => categories::cache::scan(path, config, mode),
+        ScanTask::AppCache => categories::app_cache::scan(path, config, mode),
+        ScanTask::Temp => categories::temp::scan(path, config),
+        ScanTask::Trash => categories::trash::scan(),
+        ScanTask::Build(age) => {
+            categories::build::scan(path, *age, Some(build_config), config, mode)
+        }
+        ScanTask::Downloads(age) => {
+            categories::downloads::scan(path, *age, config, mode)
+        }
+        ScanTask::Large(size) => categories::large::scan(path, *size, config, mode),
+        ScanTask::Old(age) => categories::old::scan(path, *age, config, mode),
+        ScanTask::Browser => categories::browser::scan(path, config),
+        ScanTask::System => categories::system::scan(path, config),
+        ScanTask::Empty => categories::empty::scan(path, config),
+        ScanTask::Duplicates => {
+            match categories::duplicates::scan_with_config(
+                path,
+                Some(duplicates_config),
+                config,
+            ) {
+                Ok(dup_result) => {
+                    // Store groups for enhanced display
+                    *duplicate_groups.borrow_mut() = Some(dup_result.groups.clone());
+                    Ok(dup_result.to_category_result())
+                }
+                Err(e) => Err(e),
+            }
+        }
+        ScanTask::Applications => categories::applications::scan(path, config, mode),
+        ScanTask::WindowsUpdate => categories::windows_update::scan(path, config),
+        ScanTask::EventLogs => categories::event_logs::scan(path, config),
+    }
+}
 
 /// Scan all requested categories and return aggregated results
 ///
@@ -20,11 +158,13 @@ use std::sync::mpsc::Sender;
 /// - Scans categories in parallel using rayon (2-3x faster on multi-core)
 /// - Handles errors gracefully - if one category fails, others continue
 /// - Filters out paths matching exclusion patterns from config
+/// - Supports incremental scanning via scan_cache parameter
 pub fn scan_all(
     path: &Path,
     options: ScanOptions,
     mode: OutputMode,
     config: &Config,
+    mut scan_cache: Option<&mut ScanCache>,
 ) -> Result<ScanResults> {
     // Clear git cache for fresh scan
     git::clear_cache();
@@ -89,6 +229,20 @@ pub fn scan_all(
         return Ok(results);
     }
 
+    // Start scan session if cache is enabled
+    let mut scan_id: Option<i64> = None;
+    let use_incremental = scan_cache.is_some() && config.cache.enabled;
+
+    if let Some(cache) = scan_cache.as_mut() {
+        let categories: Vec<&str> = enabled.iter().map(|(name, _)| *name).collect();
+        let scan_type = if use_incremental && cache.get_previous_scan_id()?.is_some() {
+            "incremental"
+        } else {
+            "full"
+        };
+        scan_id = Some(cache.start_scan(scan_type, &categories)?);
+    }
+
     // Create spinner for visual feedback (unless quiet mode)
     let spinner = if mode != OutputMode::Quiet {
         Some(progress::create_spinner("Scanning..."))
@@ -135,42 +289,29 @@ pub fn scan_all(
                 println!("{}", Theme::header(&format!("Scanning {}", name)));
             }
 
-            // Execute scan - pass config to all scanners for exclusion filtering
-            let result = match task {
-                ScanTask::Cache => categories::cache::scan(&path_owned, config, mode),
-                ScanTask::AppCache => categories::app_cache::scan(&path_owned, config, mode),
-                ScanTask::Temp => categories::temp::scan(&path_owned, config),
-                ScanTask::Trash => categories::trash::scan(),
-                ScanTask::Build(age) => {
-                    categories::build::scan(&path_owned, *age, Some(&build_config), config, mode)
-                }
-                ScanTask::Downloads(age) => {
-                    categories::downloads::scan(&path_owned, *age, config, mode)
-                }
-                ScanTask::Large(size) => categories::large::scan(&path_owned, *size, config, mode),
-                ScanTask::Old(age) => categories::old::scan(&path_owned, *age, config, mode),
-                ScanTask::Browser => categories::browser::scan(&path_owned, config),
-                ScanTask::System => categories::system::scan(&path_owned, config),
-                ScanTask::Empty => categories::empty::scan(&path_owned, config),
-                ScanTask::Duplicates => {
-                    // Duplicates returns a special result type
-                    // Use scan_with_config to pass configuration
-                    match categories::duplicates::scan_with_config(
-                        &path_owned,
-                        Some(&duplicates_config),
-                        config,
-                    ) {
-                        Ok(dup_result) => {
-                            // Store groups for enhanced display
-                            *duplicate_groups.borrow_mut() = Some(dup_result.groups.clone());
-                            Ok(dup_result.to_category_result())
+            // Try incremental scan if cache is available
+            let result = if use_incremental && scan_cache.is_some() && scan_id.is_some() {
+                // Attempt incremental scan
+                match try_incremental_scan(name, task, &path_owned, config, scan_cache.as_mut().unwrap(), scan_id.unwrap(), mode) {
+                    Ok(Some(cached_result)) => {
+                        // Used cache successfully
+                        Ok(cached_result)
+                    }
+                    Ok(None) => {
+                        // Need to do full scan for this category
+                        execute_category_scan(name, task, &path_owned, config, mode, &build_config, &duplicates_config, &duplicate_groups)
+                    }
+                    Err(e) => {
+                        // Cache error, fall back to full scan
+                        if mode != OutputMode::Quiet {
+                            eprintln!("Warning: Cache error for {}: {}. Falling back to full scan.", name, e);
                         }
-                        Err(e) => Err(e),
+                        execute_category_scan(name, task, &path_owned, config, mode, &build_config, &duplicates_config, &duplicate_groups)
                     }
                 }
-                ScanTask::Applications => categories::applications::scan(&path_owned, config, mode),
-                ScanTask::WindowsUpdate => categories::windows_update::scan(&path_owned, config),
-                ScanTask::EventLogs => categories::event_logs::scan(&path_owned, config),
+            } else {
+                // Full scan (no cache or cache disabled)
+                execute_category_scan(name, task, &path_owned, config, mode, &build_config, &duplicates_config, &duplicate_groups)
             };
 
             (*name, result)
@@ -228,6 +369,7 @@ pub fn scan_all_with_progress(
     options: ScanOptions,
     config: &Config,
     tx: &Sender<ScanProgressEvent>,
+    mut scan_cache: Option<&mut ScanCache>,
 ) -> Result<ScanResults> {
     // Clear git cache for fresh scan
     git::clear_cache();
@@ -500,6 +642,32 @@ pub fn scan_all_with_progress(
     }
 
     filter_exclusions(&mut results, config);
+
+    // Finish scan session if cache is enabled
+    if let Some(cache) = scan_cache.as_mut() {
+        if let Some(scan_id) = cache.current_scan_id() {
+            let mut stats = ScanStats::default();
+            stats.total_files = results.cache.items
+                + results.app_cache.items
+                + results.temp.items
+                + results.trash.items
+                + results.build.items
+                + results.downloads.items
+                + results.large.items
+                + results.old.items
+                + results.applications.items
+                + results.browser.items
+                + results.system.items
+                + results.empty.items
+                + results.duplicates.items
+                + results.windows_update.items
+                + results.event_logs.items;
+            
+            let removed = cache.cleanup_stale(scan_id)?;
+            stats.removed_files = removed;
+            cache.finish_scan(scan_id, stats)?;
+        }
+    }
 
     Ok(results)
 }

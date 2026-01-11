@@ -112,6 +112,18 @@ pub enum Commands {
         /// Exclude paths matching pattern (repeatable)
         #[arg(long, value_name = "PATTERN")]
         exclude: Vec<String>,
+
+        /// Force full rescan (ignore cache)
+        #[arg(long)]
+        force_full: bool,
+
+        /// Disable incremental scanning
+        #[arg(long)]
+        no_cache: bool,
+
+        /// Clear scan cache before running
+        #[arg(long)]
+        clear_cache: bool,
     },
 
     /// Delete files found by scan (with confirmation)
@@ -335,6 +347,10 @@ pub enum Commands {
         /// Open config file in editor
         #[arg(long)]
         edit: bool,
+
+        /// Clear scan cache
+        #[arg(long)]
+        clear_cache: bool,
     },
 
     /// Restore files from the last deletion session
@@ -518,6 +534,9 @@ impl Cli {
                     min_age,
                     min_size,
                     exclude,
+                    force_full,
+                    no_cache,
+                    clear_cache,
                 } => commands::scan_command::handle_scan(
                     all,
                     cache,
@@ -537,6 +556,9 @@ impl Cli {
                     min_age,
                     min_size,
                     exclude,
+                    force_full,
+                    no_cache,
+                    clear_cache,
                     output_mode,
                 ),
                 Commands::Clean {
@@ -647,8 +669,8 @@ impl Cli {
                     exclude,
                     output_mode,
                 ),
-                Commands::Config { show, reset, edit } => {
-                    commands::config_command::handle_config(show, reset, edit)
+                Commands::Config { show, reset, edit, clear_cache } => {
+                    commands::config_command::handle_config(show, reset, edit, clear_cache)
                 }
                 Commands::Restore {
                     last,

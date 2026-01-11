@@ -28,6 +28,9 @@ pub(crate) fn handle_scan(
     min_age: u64,
     min_size: String,
     exclude: Vec<String>,
+    force_full: bool,
+    no_cache: bool,
+    clear_cache: bool,
     output_mode: OutputMode,
 ) -> anyhow::Result<()> {
     // --all enables all categories
@@ -114,6 +117,42 @@ pub(crate) fn handle_scan(
     // Merge CLI exclusions
     config.exclusions.patterns.extend(exclude.iter().cloned());
 
+    // Handle cache flags
+    let use_cache = !no_cache && config.cache.enabled && !force_full;
+    
+    if clear_cache {
+        if let Ok(mut scan_cache) = crate::scan_cache::ScanCache::open() {
+            // Get categories to clear
+            let categories: Vec<&str> = if all {
+                vec!["cache", "app_cache", "temp", "trash", "build", "downloads", "large", "old", "applications", "windows_update", "event_logs"]
+            } else {
+                let mut cats = Vec::new();
+                if cache { cats.push("cache"); }
+                if app_cache { cats.push("app_cache"); }
+                if temp { cats.push("temp"); }
+                if trash { cats.push("trash"); }
+                if build { cats.push("build"); }
+                if downloads { cats.push("downloads"); }
+                if large { cats.push("large"); }
+                if old { cats.push("old"); }
+                if applications { cats.push("applications"); }
+                if windows_update { cats.push("windows_update"); }
+                if event_logs { cats.push("event_logs"); }
+                cats
+            };
+            
+            if categories.is_empty() {
+                scan_cache.invalidate(None)?;
+            } else {
+                scan_cache.invalidate(Some(&categories))?;
+            }
+            
+            if output_mode != OutputMode::Quiet {
+                println!("Cache cleared for specified categories.");
+            }
+        }
+    }
+
     // Use config values (after CLI overrides) for scan options
     let min_size_bytes = config.thresholds.min_size_mb * 1024 * 1024;
 
@@ -138,7 +177,28 @@ pub(crate) fn handle_scan(
         min_size_bytes,
     };
 
-    let results = scanner::scan_all(&scan_path, scan_options.clone(), output_mode, &config)?;
+    // Open scan cache if enabled
+    let mut scan_cache = if use_cache {
+        match crate::scan_cache::ScanCache::open() {
+            Ok(cache) => Some(cache),
+            Err(e) => {
+                if output_mode != OutputMode::Quiet {
+                    eprintln!("Warning: Failed to open scan cache: {}. Continuing without cache.", e);
+                }
+                None
+            }
+        }
+    } else {
+        None
+    };
+
+    let results = scanner::scan_all(
+        &scan_path,
+        scan_options.clone(),
+        output_mode,
+        &config,
+        scan_cache.as_mut(),
+    )?;
 
     if json {
         output::print_json(&results)?;

@@ -497,7 +497,8 @@ fn handle_config_event(
     // 6 show_storage_info (bool)
     // 7 scan_depth_user (u8)
     // 8 scan_depth_entire_disk (u8)
-    let fields_len = 9usize;
+    // 9 clear_cache (action)
+    let fields_len = 10usize;
 
     // Editing mode has its own key handling.
     if let ConfigEditorMode::Editing { ref mut buffer } = app_state.config_editor.mode {
@@ -744,6 +745,27 @@ fn handle_config_event(
                     };
                     app_state.config_editor.message =
                         Some("Edit value (0-255), then Enter to save (Esc cancels).".to_string());
+                }
+                9 => {
+                    // Clear scan cache
+                    match crate::scan_cache::ScanCache::open() {
+                        Ok(mut cache) => {
+                            match cache.invalidate(None) {
+                                Ok(()) => {
+                                    app_state.config_editor.message =
+                                        Some("Scan cache cleared successfully.".to_string());
+                                }
+                                Err(e) => {
+                                    app_state.config_editor.message =
+                                        Some(format!("Failed to clear cache: {}", e));
+                                }
+                            }
+                        }
+                        Err(e) => {
+                            app_state.config_editor.message =
+                                Some(format!("Failed to open cache: {}", e));
+                        }
+                    }
                 }
                 _ => {}
             }

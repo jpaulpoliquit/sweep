@@ -4,8 +4,9 @@
 
 use crate::config::Config;
 use crate::theme::Theme;
+use bytesize;
 
-pub(crate) fn handle_config(show: bool, reset: bool, edit: bool) -> anyhow::Result<()> {
+pub(crate) fn handle_config(show: bool, reset: bool, edit: bool, clear_cache: bool) -> anyhow::Result<()> {
     if show {
         let config = Config::load_or_create();
         println!("{}", Theme::header("Current Configuration"));
@@ -65,8 +66,26 @@ pub(crate) fn handle_config(show: bool, reset: bool, edit: bool) -> anyhow::Resu
         println!("  Max entries: {} (0 = unlimited)", config.history.max_entries);
         println!("  Max age: {} days (0 = forever)", config.history.max_age_days);
         println!();
+        println!("Cache Settings:");
+        println!("  Enabled: {}", config.cache.enabled);
+        println!("  Max age: {} days", config.cache.max_age_days);
+        println!(
+            "  Content hash threshold: {}",
+            bytesize::to_string(config.cache.content_hash_threshold_bytes, true)
+        );
+        println!();
         if let Ok(path) = Config::config_path() {
             println!("Config file: {}", path.display());
+        }
+    } else if clear_cache {
+        match crate::scan_cache::ScanCache::open() {
+            Ok(mut cache) => {
+                cache.invalidate(None)?;
+                println!("{} Scan cache cleared successfully.", Theme::success("OK"));
+            }
+            Err(e) => {
+                return Err(anyhow::anyhow!("Failed to clear cache: {}", e));
+            }
         }
     } else if reset {
         let default_config = Config::default();
@@ -146,6 +165,14 @@ pub(crate) fn handle_config(show: bool, reset: bool, edit: bool) -> anyhow::Resu
         println!("  Enabled: {}", config.history.enabled);
         println!("  Max entries: {} (0 = unlimited)", config.history.max_entries);
         println!("  Max age: {} days (0 = forever)", config.history.max_age_days);
+        println!();
+        println!("Cache Settings:");
+        println!("  Enabled: {}", config.cache.enabled);
+        println!("  Max age: {} days", config.cache.max_age_days);
+        println!(
+            "  Content hash threshold: {}",
+            bytesize::to_string(config.cache.content_hash_threshold_bytes, true)
+        );
         println!();
         if let Ok(path) = Config::config_path() {
             println!("Config file: {}", path.display());

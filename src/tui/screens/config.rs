@@ -16,6 +16,7 @@ use crate::tui::{
         shortcuts::{get_shortcuts, render_shortcuts},
     },
 };
+use bytesize;
 
 pub fn render(f: &mut Frame, app_state: &AppState) {
     let area = f.area();
@@ -200,6 +201,41 @@ fn render_body(f: &mut Frame, area: Rect, app_state: &AppState) {
                 format!("{}", config.ui.scan_depth_entire_disk)
             },
             field_style(8),
+        ),
+    ]));
+
+    // Cache settings display (read-only)
+    field_lines.push(Line::from(vec![Span::styled(
+        "  Cache settings:",
+        Styles::header(),
+    )]));
+    field_lines.push(Line::from(vec![
+        Span::styled("    Enabled: ", Styles::secondary()),
+        Span::styled(format!("{}", config.cache.enabled), Styles::primary()),
+    ]));
+    field_lines.push(Line::from(vec![
+        Span::styled("    Max age: ", Styles::secondary()),
+        Span::styled(format!("{} days", config.cache.max_age_days), Styles::primary()),
+    ]));
+    field_lines.push(Line::from(vec![
+        Span::styled("    Hash threshold: ", Styles::secondary()),
+        Span::styled(
+            bytesize::to_string(config.cache.content_hash_threshold_bytes, true),
+            Styles::primary(),
+        ),
+    ]));
+    field_lines.push(Line::from(""));
+
+    // 9 clear_cache (action button)
+    field_lines.push(Line::from(vec![
+        Span::styled("  Clear scan cache:   ", Styles::secondary()),
+        Span::styled(
+            "[Press Enter to clear]",
+            if selected == 9 {
+                Styles::selected()
+            } else {
+                Styles::warning()
+            },
         ),
     ]));
 

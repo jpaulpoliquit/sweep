@@ -714,7 +714,7 @@ fn perform_scan_with_progress(
     let (progress_tx, progress_rx) = std::sync::mpsc::channel();
     let _scan_handle = std::thread::spawn(move || {
         let result =
-            scanner::scan_all_with_progress(&scan_path, scan_options, &scan_config, &progress_tx);
+            scanner::scan_all_with_progress(&scan_path, scan_options, &scan_config, &progress_tx, None);
         let _ = result_tx.send(result);
     });
 
