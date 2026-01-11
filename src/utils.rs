@@ -345,7 +345,7 @@ pub fn calculate_shallow_size(path: &Path) -> u64 {
 }
 
 /// File type categories for large file detection
-#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Hash)]
 pub enum FileType {
     Video,
     Audio,

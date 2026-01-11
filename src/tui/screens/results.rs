@@ -8,7 +8,7 @@ use crate::tui::{
         shortcuts::{get_shortcuts, render_shortcuts},
     },
 };
-use crate::utils::detect_file_type;
+use crate::utils::{detect_file_type, FileType};
 use ratatui::{
     layout::{Constraint, Direction, Layout, Rect},
     style::{Modifier, Style},
@@ -31,6 +31,50 @@ fn truncate_end(s: &str, max_chars: usize) -> String {
     }
     let take = max_chars.saturating_sub(3);
     format!("{}...", s.chars().take(take).collect::<String>())
+}
+
+/// Get emoji for a category name
+fn category_emoji(category_name: &str) -> &'static str {
+    match category_name {
+        "Installed Applications" => "📱",
+        "Old Files" => "📅",
+        "Downloads" => "⬇️",
+        "Large Files" => "📦",
+        "Package Cache" => "📚",
+        "Application Cache" => "💾",
+        "Temp Files" => "🗑️",
+        "Trash" => "🗑️",
+        "Build Artifacts" => "🔨",
+        "Browser Cache" => "🌐",
+        "System Cache" => "⚙️",
+        "Empty Folders" => "📁",
+        "Duplicates" => "📋",
+        "Windows Update" => "🔄",
+        "Event Logs" => "📋",
+        _ => "📁", // Default folder emoji
+    }
+}
+
+/// Get emoji for a folder based on dominant file type in its items
+fn folder_emoji(app_state: &AppState, folder: &crate::tui::state::FolderGroup) -> &'static str {
+    use std::collections::HashMap;
+    
+    // Count file types in this folder
+    let mut type_counts: HashMap<FileType, usize> = HashMap::new();
+    
+    for &item_idx in &folder.items {
+        if let Some(item) = app_state.all_items.get(item_idx) {
+            let file_type = detect_file_type(&item.path);
+            *type_counts.entry(file_type).or_insert(0) += 1;
+        }
+    }
+    
+    // Find the dominant file type
+    if let Some((dominant_type, _)) = type_counts.iter().max_by_key(|(_, &count)| count) {
+        dominant_type.emoji()
+    } else {
+        "📁" // Default folder emoji if no items
+    }
 }
 
 fn format_ago(t: Option<SystemTime>) -> String {
@@ -252,12 +296,87 @@ pub fn render(f: &mut Frame, app_state: &mut AppState) {
 }
 
 fn render_search_bar(f: &mut Frame, area: Rect, app_state: &AppState) {
+    // Parse query to detect type filter (for display purposes)
+    let (type_filter, extension_filter, text_query) = {
+        let query = app_state.search_query.trim();
+        if query.is_empty() {
+            (None, None, String::new())
+        } else if let Some(type_part) = query.strip_prefix("/type:") {
+            let type_part = type_part.trim();
+            let (type_str, text) = if let Some(space_idx) = type_part.find(' ') {
+                let type_str = type_part[..space_idx].trim().to_lowercase();
+                let text = type_part[space_idx..].trim().to_string();
+                (type_str, text)
+            } else {
+                (type_part.to_lowercase(), String::new())
+            };
+            
+            // Check if it's an extension
+            let is_extension = type_str.starts_with('.') || 
+                (type_str.len() <= 5 && !type_str.contains(' ') && 
+                 !matches!(type_str.as_str(), "video" | "audio" | "image" | "code" | "text" | "document" | "archive" | "installer" | "database" | "backup" | "font" | "log" | "certificate" | "system" | "build" | "subtitle" | "cad" | "gis" | "vm" | "container" | "webasset" | "game" | "other"));
+            
+            if is_extension {
+                let ext = if type_str.starts_with('.') {
+                    type_str[1..].to_string()
+                } else {
+                    type_str.clone()
+                };
+                (None, Some(ext), text)
+            } else {
+                let file_type = match_file_type_string(&type_str);
+                (file_type, None, text)
+            }
+        } else if let Some(type_part) = query.strip_prefix("type:") {
+            let type_part = type_part.trim();
+            let (type_str, text) = if let Some(space_idx) = type_part.find(' ') {
+                let type_str = type_part[..space_idx].trim().to_lowercase();
+                let text = type_part[space_idx..].trim().to_string();
+                (type_str, text)
+            } else {
+                (type_part.to_lowercase(), String::new())
+            };
+            
+            let is_extension = type_str.starts_with('.') || 
+                (type_str.len() <= 5 && !type_str.contains(' ') && 
+                 !matches!(type_str.as_str(), "video" | "audio" | "image" | "code" | "text" | "document" | "archive" | "installer" | "database" | "backup" | "font" | "log" | "certificate" | "system" | "build" | "subtitle" | "cad" | "gis" | "vm" | "container" | "webasset" | "game" | "other"));
+            
+            if is_extension {
+                let ext = if type_str.starts_with('.') {
+                    type_str[1..].to_string()
+                } else {
+                    type_str.clone()
+                };
+                (None, Some(ext), text)
+            } else {
+                let file_type = match_file_type_string(&type_str);
+                (file_type, None, text)
+            }
+        } else {
+            (None, None, query.to_lowercase())
+        }
+    };
+
     let search_text = if app_state.search_mode {
         format!("/ {}_", app_state.search_query) // Cursor indicator
     } else if app_state.search_query.is_empty() {
-        "Press / to filter results...".to_string()
+        "Press / to filter results... Use /type:code, /type:.jpg, etc.".to_string()
     } else {
-        format!("Filter: {} (Esc to clear)", app_state.search_query)
+        let mut filter_text = String::new();
+        let has_extension_filter = extension_filter.is_some();
+        if let Some(ref ext) = extension_filter {
+            filter_text.push_str(&format!("Extension: .{} ", ext));
+        } else if let Some(file_type) = type_filter {
+            filter_text.push_str(&format!("Type: {} ", file_type.as_str()));
+        }
+        if !text_query.is_empty() {
+            filter_text.push_str(&format!("Text: {}", text_query));
+        } else if has_extension_filter || type_filter.is_some() {
+            filter_text.push_str("(all matching)");
+        } else {
+            filter_text.push_str(&app_state.search_query);
+        }
+        format!("Filter: {} (Esc to clear)", filter_text)
     };
 
     let style = if app_state.search_mode {
@@ -274,6 +393,74 @@ fn render_search_bar(f: &mut Frame, area: Rect, app_state: &AppState) {
     );
 
     f.render_widget(paragraph, area);
+}
+
+/// Match a string to a FileType enum value (case-insensitive, partial match)
+/// Also supports file extensions like ".jpg", "jpg", ".mp4", etc.
+fn match_file_type_string(type_str: &str) -> Option<crate::utils::FileType> {
+    use crate::utils::FileType;
+    let type_lower = type_str.to_lowercase();
+    
+    // If it starts with ., definitely treat as extension
+    if type_lower.starts_with('.') {
+        let ext = &type_lower[1..];
+        let test_path_str = format!("file.{}", ext);
+        let test_path = std::path::Path::new(&test_path_str);
+        let detected_type = crate::utils::detect_file_type(test_path);
+        if detected_type != FileType::Other {
+            return Some(detected_type);
+        }
+        return None;
+    }
+    
+    // Try exact match for type names first
+    let type_match = match type_lower.as_str() {
+        "video" => Some(FileType::Video),
+        "audio" => Some(FileType::Audio),
+        "image" => Some(FileType::Image),
+        "diskimage" | "disk image" | "disk" => Some(FileType::DiskImage),
+        "archive" => Some(FileType::Archive),
+        "installer" => Some(FileType::Installer),
+        "document" | "doc" => Some(FileType::Document),
+        "spreadsheet" | "sheet" => Some(FileType::Spreadsheet),
+        "presentation" | "pres" => Some(FileType::Presentation),
+        "code" | "source" | "src" => Some(FileType::Code),
+        "text" => Some(FileType::Text),
+        "database" | "db" => Some(FileType::Database),
+        "backup" => Some(FileType::Backup),
+        "font" | "fonts" => Some(FileType::Font),
+        "log" | "logs" => Some(FileType::Log),
+        "certificate" | "cert" | "crypto" => Some(FileType::Certificate),
+        "system" | "sys" => Some(FileType::System),
+        "build" => Some(FileType::Build),
+        "subtitle" | "sub" | "subs" => Some(FileType::Subtitle),
+        "cad" => Some(FileType::CAD),
+        "3d" | "3dmodel" | "3d model" | "model" => Some(FileType::Model3D),
+        "gis" | "map" | "maps" => Some(FileType::GIS),
+        "vm" | "virtualmachine" | "virtual machine" => Some(FileType::VirtualMachine),
+        "container" | "docker" => Some(FileType::Container),
+        "webasset" | "web asset" | "web" => Some(FileType::WebAsset),
+        "game" | "games" => Some(FileType::Game),
+        "other" => Some(FileType::Other),
+        _ => None,
+    };
+    
+    // If type name matched, return it
+    if type_match.is_some() {
+        return type_match;
+    }
+    
+    // If no type name match and it's a short string (likely an extension), try as extension
+    if type_lower.len() <= 4 && !type_lower.contains(' ') {
+        let test_path_str = format!("file.{}", type_lower);
+        let test_path = std::path::Path::new(&test_path_str);
+        let detected_type = crate::utils::detect_file_type(test_path);
+        if detected_type != FileType::Other {
+            return Some(detected_type);
+        }
+    }
+    
+    None
 }
 
 fn render_grouped_results(f: &mut Frame, area: Rect, app_state: &mut AppState) {
@@ -312,10 +499,15 @@ fn render_grouped_results(f: &mut Frame, area: Rect, app_state: &mut AppState) {
                 if !item_indices.is_empty() {
                     // Show category name as header
                     if app_state.category_groups.len() > 1 {
-                        lines.push(Line::from(vec![Span::styled(
-                            format!("  {} ({} items)", group.name, item_indices.len()),
-                            Styles::emphasis(),
-                        )]));
+                        let category_emoji_icon = category_emoji(&group.name);
+                        lines.push(Line::from(vec![
+                            Span::styled("  ", Style::default()),
+                            Span::styled(format!("{} ", category_emoji_icon), Styles::secondary()),
+                            Span::styled(
+                                format!("{} ({} items)", group.name, item_indices.len()),
+                                Styles::emphasis(),
+                            ),
+                        ]));
                     }
                     // Show items directly without folder grouping
                     for &item_idx in &item_indices {
@@ -443,6 +635,7 @@ fn render_grouped_results(f: &mut Frame, area: Rect, app_state: &mut AppState) {
 
                 let icon = if group.safe { "✓" } else { "!" };
                 let icon_style = category_style(group.safe);
+                let category_emoji_icon = category_emoji(&group.name);
 
                 let item_indices = app_state.category_item_indices(group_idx);
                 let selected_in_group = item_indices
@@ -463,6 +656,7 @@ fn render_grouped_results(f: &mut Frame, area: Rect, app_state: &mut AppState) {
                     Span::styled(checkbox, apply_sel(checkbox_style)),
                     Span::styled(" ", row_style),
                     Span::styled(format!("{} {} ", exp_marker, icon), apply_sel(icon_style)),
+                    Span::styled(format!("{} ", category_emoji_icon), apply_sel(Styles::secondary())),
                     Span::styled(format!("{:<12}", group.name), apply_sel(Styles::emphasis())),
                     Span::styled(
                         format!("{:>8}", bytesize::to_string(group.total_size, true)),
@@ -540,10 +734,11 @@ fn render_grouped_results(f: &mut Frame, area: Rect, app_state: &mut AppState) {
                     }
                 }
                 let size_str = bytesize::to_string(folder.total_size, true);
+                let folder_emoji_icon = folder_emoji(app_state, folder);
 
                 // Indent folder headers by nesting depth.
                 let indent = format!("{base_indent}{}", "  ".repeat(depth));
-                let fixed = indent.len() + 2 /*prefix*/ + 1 /*space*/ + 3 /*checkbox*/ + 1 /*space*/ + 2 /*exp*/ + 2 /*space*/ + 2 /*two spaces before size*/ + 8 + 2 /*two spaces before count*/ + 10;
+                let fixed = indent.len() + 2 /*prefix*/ + 1 /*space*/ + 3 /*checkbox*/ + 1 /*space*/ + 2 /*exp*/ + 1 /*space*/ + 2 /*emoji + space*/ + 2 /*two spaces before size*/ + 8 + 2 /*two spaces before count*/ + 10;
                 let max_len = (inner.width as usize).saturating_sub(fixed).max(8);
                 let folder_display = truncate_end(&folder_str, max_len);
 
@@ -552,6 +747,7 @@ fn render_grouped_results(f: &mut Frame, area: Rect, app_state: &mut AppState) {
                     Span::styled(checkbox, apply_sel(checkbox_style)),
                     Span::styled(" ", row_style),
                     Span::styled(format!("{} ", exp_marker), apply_sel(Styles::secondary())),
+                    Span::styled(format!("{} ", folder_emoji_icon), apply_sel(Styles::secondary())),
                     Span::styled(folder_display, apply_sel(Styles::emphasis())),
                     Span::styled(format!("  {:>8}", size_str), apply_sel(Styles::primary())),
                     Span::styled(

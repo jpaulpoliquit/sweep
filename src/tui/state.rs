@@ -1501,14 +1501,162 @@ impl AppState {
         rows
     }
 
+    /// Parse search query to extract type filter and text query
+    /// Returns (type_filter, extension_filter, text_query) where:
+    /// - type_filter is Some(FileType) if /type: syntax matches a file type category
+    /// - extension_filter is Some(extension) if /type: syntax specifies an exact extension
+    fn parse_search_query(&self) -> (Option<crate::utils::FileType>, Option<String>, String) {
+        let query = self.search_query.trim();
+        if query.is_empty() {
+            return (None, None, String::new());
+        }
+
+        // Check for /type: syntax
+        if let Some(type_part) = query.strip_prefix("/type:") {
+            let type_part = type_part.trim();
+            // Split on space to separate type from text query
+            let (type_str, text_query) = if let Some(space_idx) = type_part.find(' ') {
+                let type_str = type_part[..space_idx].trim().to_lowercase();
+                let text = type_part[space_idx..].trim().to_string();
+                (type_str, text)
+            } else {
+                (type_part.to_lowercase(), String::new())
+            };
+            
+            // Check if it's an extension (starts with . or is short and looks like extension)
+            let is_extension = type_str.starts_with('.') || 
+                (type_str.len() <= 5 && !type_str.contains(' ') && 
+                 !matches!(type_str.as_str(), "video" | "audio" | "image" | "code" | "text" | "document" | "archive" | "installer" | "database" | "backup" | "font" | "log" | "certificate" | "system" | "build" | "subtitle" | "cad" | "gis" | "vm" | "container" | "webasset" | "game" | "other"));
+            
+            if is_extension {
+                // Extract extension (remove leading dot if present)
+                let ext = if type_str.starts_with('.') {
+                    type_str[1..].to_string()
+                } else {
+                    type_str.clone()
+                };
+                return (None, Some(ext), text_query);
+            } else {
+                // Try to match as file type category
+                let file_type = self.match_file_type_string(&type_str);
+                return (file_type, None, text_query);
+            }
+        }
+
+        // Check for type: syntax (without leading slash)
+        if let Some(type_part) = query.strip_prefix("type:") {
+            let type_part = type_part.trim();
+            let (type_str, text_query) = if let Some(space_idx) = type_part.find(' ') {
+                let type_str = type_part[..space_idx].trim().to_lowercase();
+                let text = type_part[space_idx..].trim().to_string();
+                (type_str, text)
+            } else {
+                (type_part.to_lowercase(), String::new())
+            };
+            
+            let is_extension = type_str.starts_with('.') || 
+                (type_str.len() <= 5 && !type_str.contains(' ') && 
+                 !matches!(type_str.as_str(), "video" | "audio" | "image" | "code" | "text" | "document" | "archive" | "installer" | "database" | "backup" | "font" | "log" | "certificate" | "system" | "build" | "subtitle" | "cad" | "gis" | "vm" | "container" | "webasset" | "game" | "other"));
+            
+            if is_extension {
+                let ext = if type_str.starts_with('.') {
+                    type_str[1..].to_string()
+                } else {
+                    type_str.clone()
+                };
+                return (None, Some(ext), text_query);
+            } else {
+                let file_type = self.match_file_type_string(&type_str);
+                return (file_type, None, text_query);
+            }
+        }
+
+        // Regular text query
+        (None, None, query.to_lowercase())
+    }
+
+    /// Match a string to a FileType enum value (case-insensitive, partial match)
+    /// Also supports file extensions like ".jpg", "jpg", ".mp4", etc.
+    fn match_file_type_string(&self, type_str: &str) -> Option<crate::utils::FileType> {
+        use crate::utils::FileType;
+        let type_lower = type_str.to_lowercase();
+        
+        // If it starts with ., definitely treat as extension
+        if type_lower.starts_with('.') {
+            let ext = &type_lower[1..];
+            let test_path_str = format!("file.{}", ext);
+            let test_path = std::path::Path::new(&test_path_str);
+            let detected_type = crate::utils::detect_file_type(test_path);
+            if detected_type != FileType::Other {
+                return Some(detected_type);
+            }
+            return None;
+        }
+        
+        // Try exact match for type names first
+        let type_match = match type_lower.as_str() {
+            "video" => Some(FileType::Video),
+            "audio" => Some(FileType::Audio),
+            "image" => Some(FileType::Image),
+            "diskimage" | "disk image" | "disk" => Some(FileType::DiskImage),
+            "archive" => Some(FileType::Archive),
+            "installer" => Some(FileType::Installer),
+            "document" | "doc" => Some(FileType::Document),
+            "spreadsheet" | "sheet" => Some(FileType::Spreadsheet),
+            "presentation" | "pres" => Some(FileType::Presentation),
+            "code" | "source" | "src" => Some(FileType::Code),
+            "text" => Some(FileType::Text),
+            "database" | "db" => Some(FileType::Database),
+            "backup" => Some(FileType::Backup),
+            "font" | "fonts" => Some(FileType::Font),
+            "log" | "logs" => Some(FileType::Log),
+            "certificate" | "cert" | "crypto" => Some(FileType::Certificate),
+            "system" | "sys" => Some(FileType::System),
+            "build" => Some(FileType::Build),
+            "subtitle" | "sub" | "subs" => Some(FileType::Subtitle),
+            "cad" => Some(FileType::CAD),
+            "3d" | "3dmodel" | "3d model" | "model" => Some(FileType::Model3D),
+            "gis" | "map" | "maps" => Some(FileType::GIS),
+            "vm" | "virtualmachine" | "virtual machine" => Some(FileType::VirtualMachine),
+            "container" | "docker" => Some(FileType::Container),
+            "webasset" | "web asset" | "web" => Some(FileType::WebAsset),
+            "game" | "games" => Some(FileType::Game),
+            "other" => Some(FileType::Other),
+            _ => None,
+        };
+        
+        // If type name matched, return it
+        if type_match.is_some() {
+            return type_match;
+        }
+        
+        // If no type name match and it's a short string (likely an extension), try as extension
+        if type_lower.len() <= 4 && !type_lower.contains(' ') {
+            let test_path_str = format!("file.{}", type_lower);
+            let test_path = std::path::Path::new(&test_path_str);
+            let detected_type = crate::utils::detect_file_type(test_path);
+            if detected_type != FileType::Other {
+                return Some(detected_type);
+            }
+        }
+        
+        None
+    }
+
     /// Get results rows filtered by search query.
     /// Returns all rows if search_query is empty.
     /// Only shows category/folder headers if they contain matching items.
+    /// Supports /type:{filetype} syntax for filtering by file type.
     pub fn filtered_results_rows(&self) -> Vec<ResultsRow> {
         let query = self.search_query.trim().to_lowercase();
         if query.is_empty() {
             return self.results_rows();
         }
+
+        let (type_filter, extension_filter, text_query) = self.parse_search_query();
+        
+        // Clone extension filter for use in closure
+        let extension_filter_clone = extension_filter.clone();
 
         let mut filtered = Vec::new();
         let skip_category_header = self.category_groups.len() == 1;
@@ -1516,14 +1664,40 @@ impl AppState {
         // Helper to check if an item matches the query
         let item_matches = |item_idx: usize| -> bool {
             if let Some(item) = self.all_items.get(item_idx) {
-                let path_str = item.path.display().to_string().to_lowercase();
-                if path_str.contains(&query) {
-                    return true;
+                // Check extension filter first (exact match)
+                if let Some(ref filter_ext) = extension_filter_clone {
+                    if let Some(item_ext) = item.path.extension().and_then(|e| e.to_str()) {
+                        if item_ext.to_lowercase() != *filter_ext {
+                            return false;
+                        }
+                    } else {
+                        // Item has no extension, but we're filtering by extension
+                        return false;
+                    }
                 }
-                if let Some(display_name) = item.display_name.as_ref() {
-                    return display_name.to_lowercase().contains(&query);
+                
+                // Check type filter (category-based)
+                if let Some(filter_type) = type_filter {
+                    let item_type = crate::utils::detect_file_type(&item.path);
+                    if item_type != filter_type {
+                        return false;
+                    }
                 }
-                false
+
+                // Check text query if present
+                if !text_query.is_empty() {
+                    let path_str = item.path.display().to_string().to_lowercase();
+                    if path_str.contains(&text_query) {
+                        return true;
+                    }
+                    if let Some(display_name) = item.display_name.as_ref() {
+                        return display_name.to_lowercase().contains(&text_query);
+                    }
+                    return false;
+                }
+
+                // If only type/extension filter (and it matched), return true
+                true
             } else {
                 false
             }
