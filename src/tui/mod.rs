@@ -1285,7 +1285,10 @@ fn perform_cleanup(
                             cleaner::DeleteOutcome::SkippedMissing
                             | cleaner::DeleteOutcome::SkippedSystem,
                         ) => {}
-                        Ok(cleaner::DeleteOutcome::SkippedLocked) => had_error = true,
+                        Ok(
+                            cleaner::DeleteOutcome::SkippedLocked
+                            | cleaner::DeleteOutcome::SkippedPermission,
+                        ) => had_error = true,
                         Err(_) => had_error = true,
                     }
                 }
@@ -1354,7 +1357,10 @@ fn perform_cleanup(
                 Ok(
                     cleaner::DeleteOutcome::SkippedMissing | cleaner::DeleteOutcome::SkippedSystem,
                 ) => {}
-                Ok(cleaner::DeleteOutcome::SkippedLocked) => {
+                Ok(
+                    cleaner::DeleteOutcome::SkippedLocked
+                    | cleaner::DeleteOutcome::SkippedPermission,
+                ) => {
                     errors += 1;
                     let category_lower = category.to_lowercase();
                     history.log_failure(
@@ -1362,7 +1368,7 @@ fn perform_cleanup(
                         size_bytes,
                         &category_lower,
                         permanent,
-                        "Path is locked by another process",
+                        "Path is locked or permission denied",
                     );
                 }
                 Err(e) => {
@@ -1422,14 +1428,17 @@ fn perform_cleanup(
                 Ok(
                     cleaner::DeleteOutcome::SkippedMissing | cleaner::DeleteOutcome::SkippedSystem,
                 ) => {}
-                Ok(cleaner::DeleteOutcome::SkippedLocked) => {
+                Ok(
+                    cleaner::DeleteOutcome::SkippedLocked
+                    | cleaner::DeleteOutcome::SkippedPermission,
+                ) => {
                     errors += 1;
                     history.log_failure(
                         &path,
                         size_bytes,
                         "cache",
                         permanent,
-                        "Path is locked by another process",
+                        "Path is locked or permission denied",
                     );
                 }
                 Err(e) => {

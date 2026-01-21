@@ -5,6 +5,7 @@ use std::fs;
 use std::io::{self, Write};
 use std::path::PathBuf;
 use std::process::Command;
+use std::time::{SystemTime, UNIX_EPOCH};
 
 use crate::output::OutputMode;
 use crate::theme::Theme;
@@ -166,9 +167,35 @@ fn download_update(asset_url: &str, output_path: &PathBuf) -> Result<()> {
     Ok(())
 }
 
+fn create_update_temp_dir() -> Result<PathBuf> {
+    let base = env::temp_dir();
+    let pid = std::process::id();
+    let timestamp = SystemTime::now()
+        .duration_since(UNIX_EPOCH)
+        .unwrap_or_default()
+        .as_millis();
+
+    for attempt in 0..5 {
+        let candidate = base.join(format!("wole-update-{}-{}-{}", pid, timestamp, attempt));
+        match fs::create_dir(&candidate) {
+            Ok(()) => return Ok(candidate),
+            Err(err) if err.kind() == io::ErrorKind::AlreadyExists => continue,
+            Err(err) => {
+                return Err(err).with_context(|| {
+                    format!("Failed to create update temp dir: {}", candidate.display())
+                })
+            }
+        }
+    }
+
+    Err(anyhow::anyhow!(
+        "Failed to create a unique update temp directory"
+    ))
+}
+
 /// Install the update
 /// Returns Ok(true) if update was deferred, Ok(false) if installed immediately
-fn install_update(zip_path: &PathBuf, output_mode: OutputMode) -> Result<bool> {
+fn install_update(zip_path: &PathBuf, temp_dir: &PathBuf, output_mode: OutputMode) -> Result<bool> {
     let install_dir = uninstall::get_install_dir()?;
 
     // Create install directory if it doesn't exist
@@ -180,7 +207,7 @@ fn install_update(zip_path: &PathBuf, output_mode: OutputMode) -> Result<bool> {
     })?;
 
     // Extract zip file
-    let extract_dir = env::temp_dir().join("wole-update");
+    let extract_dir = temp_dir.join("extract");
     fs::create_dir_all(&extract_dir).context("Failed to create temp extraction directory")?;
 
     // Use PowerShell to extract (works on all Windows versions)
@@ -245,8 +272,7 @@ fn install_update(zip_path: &PathBuf, output_mode: OutputMode) -> Result<bool> {
         match fs::copy(&new_exe, &target_exe) {
             Ok(_) => {
                 // Success! Clean up and return
-                let _ = fs::remove_dir_all(&extract_dir);
-                let _ = fs::remove_file(zip_path);
+                let _ = fs::remove_dir_all(temp_dir);
 
                 if output_mode != OutputMode::Quiet {
                     println!(
@@ -272,6 +298,7 @@ fn install_update(zip_path: &PathBuf, output_mode: OutputMode) -> Result<bool> {
         let new_exe_str = new_exe.to_string_lossy().replace('\\', "\\\\");
         let extract_dir_str = extract_dir.to_string_lossy().replace('\\', "\\\\");
         let zip_path_str = zip_path.to_string_lossy().replace('\\', "\\\\");
+        let temp_dir_str = temp_dir.to_string_lossy().replace('\\', "\\\\");
 
         // Create batch script that waits for the process to exit, then replaces the file
         // Use a more robust approach: try to copy with retries
@@ -305,6 +332,7 @@ if not errorlevel 1 (
     REM Success! Clean up temp files
     rmdir /S /Q "{}" >NUL 2>&1
     del /F /Q "{}" >NUL 2>&1
+    rmdir /S /Q "{}" >NUL 2>&1
     REM Delete this batch script itself
     (goto) 2>NUL & del "%~f0"
     exit /B 0
@@ -319,7 +347,7 @@ if not errorlevel 1 (
     goto copy_loop
 )
 "#,
-            new_exe_str, target_exe_str, extract_dir_str, zip_path_str
+            new_exe_str, target_exe_str, extract_dir_str, zip_path_str, temp_dir_str
         );
 
         fs::write(&batch_script, batch_content).context("Failed to create update batch script")?;
@@ -373,8 +401,7 @@ if not errorlevel 1 (
         fs::copy(&new_exe, &target_exe).context("Failed to copy executable")?;
 
         // Clean up temp files
-        let _ = fs::remove_dir_all(&extract_dir);
-        let _ = fs::remove_file(zip_path);
+        let _ = fs::remove_dir_all(temp_dir);
 
         if output_mode != OutputMode::Quiet {
             println!(
@@ -464,8 +491,7 @@ pub fn check_and_update(yes: bool, check_only: bool, output_mode: OutputMode) ->
                 );
             }
 
-            let temp_dir = env::temp_dir().join("wole-update");
-            fs::create_dir_all(&temp_dir)?;
+            let temp_dir = create_update_temp_dir()?;
             let zip_path = temp_dir.join(&asset_name);
 
             download_update(&asset.browser_download_url, &zip_path)?;
@@ -474,7 +500,7 @@ pub fn check_and_update(yes: bool, check_only: bool, output_mode: OutputMode) ->
                 println!("{} Installing update...", Theme::primary("Installing"));
             }
 
-            let update_deferred = install_update(&zip_path, output_mode)?;
+            let update_deferred = install_update(&zip_path, &temp_dir, output_mode)?;
 
             if !update_deferred && output_mode != OutputMode::Quiet {
                 println!(
