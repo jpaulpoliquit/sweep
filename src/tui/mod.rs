@@ -1095,6 +1095,40 @@ fn perform_scan_with_progress(
     Ok(())
 }
 
+fn run_blocking_with_spinner<T, F>(
+    app_state: &mut AppState,
+    terminal: &mut ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>,
+    work: F,
+) -> Result<T>
+where
+    T: Send + 'static,
+    F: FnOnce() -> Result<T> + Send + 'static,
+{
+    let (tx, rx) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        let result = work();
+        let _ = tx.send(result);
+    });
+
+    let mut last_tick_update = std::time::Instant::now();
+    loop {
+        match rx.try_recv() {
+            Ok(result) => return result,
+            Err(std::sync::mpsc::TryRecvError::Empty) => {
+                if last_tick_update.elapsed().as_millis() >= 100 {
+                    app_state.tick = app_state.tick.wrapping_add(1);
+                    last_tick_update = std::time::Instant::now();
+                    let _ = terminal.draw(|f| render(f, app_state));
+                }
+                std::thread::sleep(Duration::from_millis(16));
+            }
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                return Err(anyhow::anyhow!("Cleanup worker disconnected"));
+            }
+        }
+    }
+}
+
 /// Perform cleanup of selected items with real-time progress updates
 /// Returns (cleaned_count, cleaned_bytes, error_count, failed_temp_files)
 fn perform_cleanup(
@@ -1141,7 +1175,8 @@ fn perform_cleanup(
         }
         let _ = terminal.draw(|f| render(f, app_state));
 
-        match categories::trash::clean() {
+        let trash_result = run_blocking_with_spinner(app_state, terminal, || categories::trash::clean());
+        match trash_result {
             Ok(()) => {
                 // All trash items are cleaned
                 trash_cleaned = trash_items.len() as u64;
@@ -1193,6 +1228,8 @@ fn perform_cleanup(
     // All other categories can be batch deleted together
 
     let mut applications_items: Vec<(usize, std::path::PathBuf, u64)> = Vec::new();
+    let mut windows_update_items: Vec<(usize, std::path::PathBuf, u64)> = Vec::new();
+    let mut event_log_items: Vec<(usize, std::path::PathBuf, u64)> = Vec::new();
     let mut special_items: Vec<(usize, String, std::path::PathBuf, u64)> = Vec::new();
     let mut cache_items: Vec<(usize, std::path::PathBuf, u64)> = Vec::new();
     let mut temp_items: Vec<(usize, std::path::PathBuf, u64)> = Vec::new();
@@ -1203,6 +1240,12 @@ fn perform_cleanup(
             "Installed Applications" => {
                 // Applications need a real uninstall step; don't batch-delete folders.
                 applications_items.push((idx, path, size));
+            }
+            "Windows Update" => {
+                windows_update_items.push((idx, path, size));
+            }
+            "Event Logs" => {
+                event_log_items.push((idx, path, size));
             }
             "Browser Cache" | "System Cache" | "Empty Folders" => {
                 special_items.push((idx, category, path, size));
@@ -1254,8 +1297,13 @@ fn perform_cleanup(
             // Tighten: uninstall must succeed before deleting any artifacts.
             if crate::categories::applications::get_app_uninstall_string(&install_path).is_none() {
                 had_error = true;
-            } else if let Err(_e) = crate::categories::applications::uninstall(&install_path) {
-                had_error = true;
+            } else {
+                let uninstall_path = install_path.clone();
+                if let Err(_e) = run_blocking_with_spinner(app_state, terminal, move || {
+                    crate::categories::applications::uninstall(&uninstall_path)
+                }) {
+                    had_error = true;
+                }
             }
 
             // Post-check: if it still appears installed, skip artifact deletion (tight/safe).
@@ -1299,6 +1347,104 @@ fn perform_cleanup(
             }
 
             // Update progress after each app
+            if let crate::tui::state::Screen::Cleaning { ref mut progress } = app_state.screen {
+                progress.cleaned = cleaned;
+                progress.errors = errors;
+            }
+            app_state.tick = app_state.tick.wrapping_add(1);
+            let _ = terminal.draw(|f| render(f, app_state));
+        }
+    }
+
+    // Handle Windows Update items with category-specific cleanup
+    if !windows_update_items.is_empty() {
+        if let crate::tui::state::Screen::Cleaning { ref mut progress } = app_state.screen {
+            progress.current_category = format!(
+                "Cleaning Windows Update files... ({})",
+                windows_update_items.len()
+            );
+        }
+        let _ = terminal.draw(|f| render(f, app_state));
+
+        for (_idx, path, size_bytes) in windows_update_items {
+            if let crate::tui::state::Screen::Cleaning { ref mut progress } = app_state.screen {
+                progress.current_path = Some(path.clone());
+            }
+            let _ = terminal.draw(|f| render(f, app_state));
+
+            let clean_path = path.clone();
+            let clean_result = run_blocking_with_spinner(app_state, terminal, move || {
+                categories::windows_update::clean(&clean_path)
+            });
+
+            // Log + counters (always treat as permanent in history to avoid restore offering).
+            let log_as_permanent = true;
+            match clean_result {
+                Ok(()) => {
+                    cleaned += 1;
+                    cleaned_bytes += size_bytes;
+                    history.log_success(&path, size_bytes, "windows_update", log_as_permanent);
+                }
+                Err(e) => {
+                    errors += 1;
+                    history.log_failure(
+                        &path,
+                        size_bytes,
+                        "windows_update",
+                        log_as_permanent,
+                        &e.to_string(),
+                    );
+                }
+            }
+
+            if let crate::tui::state::Screen::Cleaning { ref mut progress } = app_state.screen {
+                progress.cleaned = cleaned;
+                progress.errors = errors;
+            }
+            app_state.tick = app_state.tick.wrapping_add(1);
+            let _ = terminal.draw(|f| render(f, app_state));
+        }
+    }
+
+    // Handle Event Log items with category-specific cleanup
+    if !event_log_items.is_empty() {
+        if let crate::tui::state::Screen::Cleaning { ref mut progress } = app_state.screen {
+            progress.current_category =
+                format!("Cleaning Event Logs... ({})", event_log_items.len());
+        }
+        let _ = terminal.draw(|f| render(f, app_state));
+
+        for (_idx, path, size_bytes) in event_log_items {
+            if let crate::tui::state::Screen::Cleaning { ref mut progress } = app_state.screen {
+                progress.current_path = Some(path.clone());
+            }
+            let _ = terminal.draw(|f| render(f, app_state));
+
+            let clean_path = path.clone();
+            let clean_result = run_blocking_with_spinner(app_state, terminal, move || {
+                categories::event_logs::clean(&clean_path)
+            });
+
+            // Log + counters (always treat as permanent in history to avoid restore offering).
+            let log_as_permanent = true;
+            match clean_result {
+                Ok(()) => {
+                    cleaned += 1;
+                    cleaned_bytes += size_bytes;
+                    history.log_success(&path, size_bytes, "event_logs", log_as_permanent);
+                }
+                Err(e) => {
+                    errors += 1;
+                    history.log_failure(
+                        &path,
+                        size_bytes,
+                        "event_logs",
+                        log_as_permanent,
+                        &e.to_string(),
+                    );
+                }
+            }
+
             if let crate::tui::state::Screen::Cleaning { ref mut progress } = app_state.screen {
                 progress.cleaned = cleaned;
                 progress.errors = errors;
@@ -1505,7 +1651,11 @@ fn perform_cleanup(
             }
 
             // Delete this batch
-            let batch_result = cleaner::clean_paths_batch(batch_chunk, permanent);
+            let batch_paths: Vec<std::path::PathBuf> =
+                batch_chunk.iter().cloned().collect();
+            let batch_result = run_blocking_with_spinner(app_state, terminal, move || {
+                Ok(cleaner::clean_paths_batch(&batch_paths, permanent))
+            })?;
             temp_success += batch_result.success_count;
             temp_errors += batch_result.error_count;
             deleted_paths.extend(batch_result.deleted_paths);
@@ -1629,7 +1779,11 @@ fn perform_cleanup(
             }
 
             // Delete this batch
-            let batch_result = cleaner::clean_paths_batch(batch_chunk, permanent);
+            let batch_paths: Vec<std::path::PathBuf> =
+                batch_chunk.iter().cloned().collect();
+            let batch_result = run_blocking_with_spinner(app_state, terminal, move || {
+                Ok(cleaner::clean_paths_batch(&batch_paths, permanent))
+            })?;
             batch_success += batch_result.success_count;
             batch_errors += batch_result.error_count;
             deleted_paths.extend(batch_result.deleted_paths);
