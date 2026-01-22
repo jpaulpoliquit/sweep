@@ -78,19 +78,8 @@ pub fn run(initial_state: Option<AppState>) -> Result<()> {
             // Trigger disk breakdown scan in background on first load if cache is empty
             #[cfg(windows)]
             {
-                use crate::status::gather_disk_breakdown_cached_only;
-                use std::sync::atomic::{AtomicBool, Ordering};
-                static DISK_BREAKDOWN_TRIGGERED: AtomicBool = AtomicBool::new(false);
-
-                // Check if we need to trigger background scan (only once per session)
-                if !DISK_BREAKDOWN_TRIGGERED.load(Ordering::Relaxed) {
-                    if gather_disk_breakdown_cached_only().is_none() {
-                        // Cache is empty, trigger background scan
-                        use crate::status::refresh_disk_breakdown_async;
-                        refresh_disk_breakdown_async();
-                    }
-                    DISK_BREAKDOWN_TRIGGERED.store(true, Ordering::Relaxed);
-                }
+                use crate::status::ensure_disk_breakdown_refresh;
+                ensure_disk_breakdown_refresh();
             }
 
             // Check for status updates from background thread (non-blocking)
@@ -1285,10 +1274,8 @@ fn perform_cleanup(
                             cleaner::DeleteOutcome::SkippedMissing
                             | cleaner::DeleteOutcome::SkippedSystem,
                         ) => {}
-                        Ok(
-                            cleaner::DeleteOutcome::SkippedLocked
-                            | cleaner::DeleteOutcome::SkippedPermission,
-                        ) => had_error = true,
+                        Ok(cleaner::DeleteOutcome::SkippedLocked) => had_error = true,
+                        Ok(cleaner::DeleteOutcome::SkippedPermission) => had_error = true,
                         Err(_) => had_error = true,
                     }
                 }
@@ -1371,13 +1358,7 @@ fn perform_cleanup(
                 Ok(cleaner::DeleteOutcome::SkippedPermission) => {
                     errors += 1;
                     let category_lower = category.to_lowercase();
-                    history.log_failure(
-                        &path,
-                        size_bytes,
-                        &category_lower,
-                        permanent,
-                        "Permission denied",
-                    );
+                    history.log_failure(&path, size_bytes, &category_lower, permanent, "Permission denied");
                 }
                 Err(e) => {
                     errors += 1;
