@@ -18,10 +18,7 @@ use std::sync::mpsc::Sender;
 /// Save scan results to cache in a background thread to avoid blocking the UI.
 /// This function spawns a thread that opens its own database connection and performs
 /// all cache writes asynchronously, allowing the scan results to be returned immediately.
-fn save_results_to_cache_background(
-    results: ScanResults,
-    scan_session_id: i64,
-) {
+fn save_results_to_cache_background(results: ScanResults, scan_session_id: i64) {
     std::thread::spawn(move || {
         // Open a new cache connection in the background thread
         let mut cache = match ScanCache::open() {
@@ -34,10 +31,8 @@ fn save_results_to_cache_background(
 
         // Save all scanned files to cache using per-category scan IDs
         // Group files by category and save each group with its category-specific scan ID
-        let mut category_batches: std::collections::HashMap<
-            String,
-            Vec<(FileSignature, String)>,
-        > = std::collections::HashMap::new();
+        let mut category_batches: std::collections::HashMap<String, Vec<(FileSignature, String)>> =
+            std::collections::HashMap::new();
 
         // Helper to add paths from a category result
         // Exclude files that are in the recycle bin from cache (they were cleaned)
@@ -79,11 +74,13 @@ fn save_results_to_cache_background(
         for (category, files) in category_batches {
             if !files.is_empty() {
                 // Get category scan ID (increments if category was scanned before)
-                if let Ok(category_scan_id) =
-                    cache.get_category_scan_id(&category, scan_session_id)
+                if let Ok(category_scan_id) = cache.get_category_scan_id(&category, scan_session_id)
                 {
                     if let Err(e) = cache.upsert_files_batch(&files, category_scan_id) {
-                        eprintln!("Warning: Failed to update cache batch for {}: {}", category, e);
+                        eprintln!(
+                            "Warning: Failed to update cache batch for {}: {}",
+                            category, e
+                        );
                     }
                 }
             }

@@ -3019,9 +3019,7 @@ fn format_memory_section_new(status: &SystemStatus) -> Vec<String> {
     let swap_bar = create_colored_bar(status.memory.swap_percent / 100.0, MAIN_BAR_WIDTH);
     let swap_value = format!(
         "{:.1}% {:.1}/{:.1}G",
-        status.memory.swap_percent,
-        status.memory.swap_used_gb,
-        status.memory.swap_total_gb
+        status.memory.swap_percent, status.memory.swap_used_gb, status.memory.swap_total_gb
     );
     lines.push(format_bar_value_line(
         "Swap",
@@ -3033,7 +3031,10 @@ fn format_memory_section_new(status: &SystemStatus) -> Vec<String> {
     ));
 
     // Total - consistent format (no bar, just value)
-    let total_value = format!("{:.1} / {:.1} GB", status.memory.used_gb, status.memory.total_gb);
+    let total_value = format!(
+        "{:.1} / {:.1} GB",
+        status.memory.used_gb, status.memory.total_gb
+    );
     lines.push(format_bar_value_line(
         "Total",
         MAIN_LABEL_WIDTH,
@@ -3064,7 +3065,10 @@ fn format_disk_section_new(status: &SystemStatus) -> Vec<String> {
     ));
 
     // Free - consistent format (no bar, just value)
-    let free_value = format!("{:.1} / {:.1} GB", status.disk.free_gb, status.disk.total_gb);
+    let free_value = format!(
+        "{:.1} / {:.1} GB",
+        status.disk.free_gb, status.disk.total_gb
+    );
     lines.push(format_bar_value_line(
         "Free",
         MAIN_LABEL_WIDTH,
@@ -3077,8 +3081,10 @@ fn format_disk_section_new(status: &SystemStatus) -> Vec<String> {
     // Read/Write speeds - consistent format
     if status.disk.read_speed_mb < 1.0 {
         let kbps = status.disk.read_speed_mb * 1000.0;
-        let read_bar =
-            create_colored_bar((status.disk.read_speed_mb / 100.0).min(1.0) as f32, MAIN_BAR_WIDTH);
+        let read_bar = create_colored_bar(
+            (status.disk.read_speed_mb / 100.0).min(1.0) as f32,
+            MAIN_BAR_WIDTH,
+        );
         let read_value = format!("{:.1} Kbps", kbps);
         lines.push(format_bar_value_line(
             "Read",
@@ -3089,8 +3095,10 @@ fn format_disk_section_new(status: &SystemStatus) -> Vec<String> {
             MAIN_VALUE_WIDTH,
         ));
     } else {
-        let read_bar =
-            create_colored_bar((status.disk.read_speed_mb / 100.0).min(1.0) as f32, MAIN_BAR_WIDTH);
+        let read_bar = create_colored_bar(
+            (status.disk.read_speed_mb / 100.0).min(1.0) as f32,
+            MAIN_BAR_WIDTH,
+        );
         let read_value = format!("{:.1} MB/s", status.disk.read_speed_mb);
         lines.push(format_bar_value_line(
             "Read",
@@ -3104,8 +3112,10 @@ fn format_disk_section_new(status: &SystemStatus) -> Vec<String> {
 
     if status.disk.write_speed_mb < 1.0 {
         let kbps = status.disk.write_speed_mb * 1000.0;
-        let write_bar =
-            create_colored_bar((status.disk.write_speed_mb / 100.0).min(1.0) as f32, MAIN_BAR_WIDTH);
+        let write_bar = create_colored_bar(
+            (status.disk.write_speed_mb / 100.0).min(1.0) as f32,
+            MAIN_BAR_WIDTH,
+        );
         let write_value = format!("{:.1} Kbps", kbps);
         lines.push(format_bar_value_line(
             "Write",
@@ -3116,8 +3126,10 @@ fn format_disk_section_new(status: &SystemStatus) -> Vec<String> {
             MAIN_VALUE_WIDTH,
         ));
     } else {
-        let write_bar =
-            create_colored_bar((status.disk.write_speed_mb / 100.0).min(1.0) as f32, MAIN_BAR_WIDTH);
+        let write_bar = create_colored_bar(
+            (status.disk.write_speed_mb / 100.0).min(1.0) as f32,
+            MAIN_BAR_WIDTH,
+        );
         let write_value = format!("{:.1} MB/s", status.disk.write_speed_mb);
         lines.push(format_bar_value_line(
             "Write",
@@ -3136,11 +3148,7 @@ fn format_disk_section_new(status: &SystemStatus) -> Vec<String> {
             let disk_type = if disk.is_removable { "[EXT]" } else { "[SSD]" };
             lines.push(format!(
                 "{} {}  {:.1}/{:.1} GB ({:.0}%)",
-                disk_type,
-                disk.mount_point,
-                disk.used_gb,
-                disk.total_gb,
-                disk.used_percent
+                disk_type, disk.mount_point, disk.used_gb, disk.total_gb, disk.used_percent
             ));
         }
     }
@@ -3245,8 +3253,10 @@ fn format_network_section_new(status: &SystemStatus) -> Vec<String> {
     // Download - consistent format
     if status.network.download_mb < 1.0 {
         let kbps = status.network.download_mb * 1000.0;
-        let down_bar =
-            create_colored_bar((status.network.download_mb / 10.0).min(1.0) as f32, MAIN_BAR_WIDTH);
+        let down_bar = create_colored_bar(
+            (status.network.download_mb / 10.0).min(1.0) as f32,
+            MAIN_BAR_WIDTH,
+        );
         let down_value = format!("{:.2} Kbps", kbps);
         lines.push(format_bar_value_line(
             "Down",
@@ -3257,8 +3267,10 @@ fn format_network_section_new(status: &SystemStatus) -> Vec<String> {
             MAIN_VALUE_WIDTH,
         ));
     } else {
-        let down_bar =
-            create_colored_bar((status.network.download_mb / 10.0).min(1.0) as f32, MAIN_BAR_WIDTH);
+        let down_bar = create_colored_bar(
+            (status.network.download_mb / 10.0).min(1.0) as f32,
+            MAIN_BAR_WIDTH,
+        );
         let down_value = format!("{:.2} MB/s", status.network.download_mb);
         lines.push(format_bar_value_line(
             "Down",
@@ -3273,8 +3285,10 @@ fn format_network_section_new(status: &SystemStatus) -> Vec<String> {
     // Upload - consistent format
     if status.network.upload_mb < 1.0 {
         let kbps = status.network.upload_mb * 1000.0;
-        let up_bar =
-            create_colored_bar((status.network.upload_mb / 10.0).min(1.0) as f32, MAIN_BAR_WIDTH);
+        let up_bar = create_colored_bar(
+            (status.network.upload_mb / 10.0).min(1.0) as f32,
+            MAIN_BAR_WIDTH,
+        );
         let up_value = format!("{:.2} Kbps", kbps);
         lines.push(format_bar_value_line(
             "Up",
@@ -3285,8 +3299,10 @@ fn format_network_section_new(status: &SystemStatus) -> Vec<String> {
             MAIN_VALUE_WIDTH,
         ));
     } else {
-        let up_bar =
-            create_colored_bar((status.network.upload_mb / 10.0).min(1.0) as f32, MAIN_BAR_WIDTH);
+        let up_bar = create_colored_bar(
+            (status.network.upload_mb / 10.0).min(1.0) as f32,
+            MAIN_BAR_WIDTH,
+        );
         let up_value = format!("{:.2} MB/s", status.network.upload_mb);
         lines.push(format_bar_value_line(
             "Up",
@@ -3309,9 +3325,13 @@ fn format_network_section_new(status: &SystemStatus) -> Vec<String> {
             status_text.push_str("Disconnected");
         }
         if let Some(conn_type) = &iface.connection_type {
-            if conn_type.to_lowercase().contains("wifi") || conn_type.to_lowercase().contains("wireless") {
+            if conn_type.to_lowercase().contains("wifi")
+                || conn_type.to_lowercase().contains("wireless")
+            {
                 status_text.push_str(" · WiFi");
-            } else if conn_type.to_lowercase().contains("ethernet") || conn_type.to_lowercase().contains("lan") {
+            } else if conn_type.to_lowercase().contains("ethernet")
+                || conn_type.to_lowercase().contains("lan")
+            {
                 status_text.push_str(" · Ethernet");
             }
         }
@@ -3373,7 +3393,9 @@ fn format_boot_section_new(status: &SystemStatus) -> Vec<String> {
         // Last Boot Time - consistent format (compact, relative time first)
         let boot_time_str = boot_info.last_boot_time.format("%H:%M");
         let now = chrono::Local::now();
-        let days_ago = now.signed_duration_since(boot_info.last_boot_time).num_days();
+        let days_ago = now
+            .signed_duration_since(boot_info.last_boot_time)
+            .num_days();
         let ago_str = if days_ago == 0 {
             "today".to_string()
         } else if days_ago == 1 {
@@ -3486,7 +3508,11 @@ fn format_processes_section_new(status: &SystemStatus) -> Vec<String> {
         // CPU % with mini bar - bar left, percentage right-aligned
         let cpu_bar = create_colored_bar(proc.cpu_usage.min(100.0) / 100.0, PROC_CPU_BAR_WIDTH);
         let cpu_bar_padded = pad_bar_to_visible(&cpu_bar, PROC_CPU_BAR_WIDTH);
-        let cpu_percent = format!("{:>width$.1}%", proc.cpu_usage, width = PROC_CPU_PERCENT_WIDTH - 1); // -1 for %
+        let cpu_percent = format!(
+            "{:>width$.1}%",
+            proc.cpu_usage,
+            width = PROC_CPU_PERCENT_WIDTH - 1
+        ); // -1 for %
         let cpu_cell = format!("{} {}", cpu_bar_padded, cpu_percent);
         let cpu_cell_padded = pad_to_visible(&cpu_cell, PROC_CPU_COL_WIDTH);
         line.push_str(&cpu_cell_padded);
@@ -3509,7 +3535,11 @@ fn format_processes_section_new(status: &SystemStatus) -> Vec<String> {
                 } else {
                     handles.to_string()
                 };
-                line.push_str(&format!("{:>width$}  ", handle_str, width = PROC_HANDLES_WIDTH));
+                line.push_str(&format!(
+                    "{:>width$}  ",
+                    handle_str,
+                    width = PROC_HANDLES_WIDTH
+                ));
             } else {
                 line.push_str(&format!("{:>width$}  ", "-", width = PROC_HANDLES_WIDTH));
             }
@@ -3571,7 +3601,7 @@ fn format_two_columns(left: &[String], right: &[String], col_width: usize) -> St
 
         // Calculate visible width using Unicode width
         let left_visible_width = visible_width(left_line);
-        
+
         // ALWAYS pad left column to col_width - no exceptions
         let padded_left = if left_visible_width < col_width {
             let padding = col_width - left_visible_width;
@@ -3621,7 +3651,7 @@ fn pad_bar_to_visible(bar: &str, width: usize) -> String {
 
 fn truncate_to_visible(s: &str, width: usize) -> String {
     use unicode_width::UnicodeWidthChar;
-    
+
     let mut result = String::new();
     let mut visible_count = 0usize;
     let mut chars = s.chars().peekable();
@@ -3658,13 +3688,13 @@ fn strip_ansi_codes(s: &str) -> String {
     // Remove ANSI escape sequences (simplified version)
     let mut result = String::new();
     let mut chars = s.chars().peekable();
-    
+
     while let Some(ch) = chars.next() {
         if ch == '\x1b' {
             // Skip ANSI escape sequence
             if chars.peek() == Some(&'[') {
                 chars.next(); // consume '['
-                // Skip until we find 'm' or end
+                              // Skip until we find 'm' or end
                 while let Some(c) = chars.next() {
                     if c == 'm' {
                         break;
@@ -3675,7 +3705,7 @@ fn strip_ansi_codes(s: &str) -> String {
             result.push(ch);
         }
     }
-    
+
     result
 }
 
