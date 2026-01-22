@@ -8,7 +8,7 @@
   <a href="https://github.com/jplx05/wole/releases"><img src="https://img.shields.io/github/v/tag/jplx05/wole?label=version&style=flat-square" alt="Version"></a>
   <a href="LICENSE"><img src="https://img.shields.io/badge/license-MIT-blue.svg?style=flat-square" alt="License"></a>
   <a href="https://github.com/jplx05/wole/commits"><img src="https://img.shields.io/github/commit-activity/m/jplx05/wole?style=flat-square" alt="Commits"></a>
-  <a href="https://x.com/jplx05"><img src="https://img.shields.io/badge/follow-jplx05-red?style=flat-square&logo=X" alt="X (Twitter)"></a>
+  <!-- <a href="https://x.com/jplx05"><img src="https://img.shields.io/badge/follow-jplx05-red?style=flat-square&logo=X" alt="X (Twitter)"></a> -->
 </p>
 
 ## Features
@@ -500,7 +500,6 @@ cargo build --release
 
 - If Wole saved you disk space, consider starring the repo or sharing it with friends.
 - Have ideas or fixes? Check our [Contributing Guide](CONTRIBUTING.md), then open an issue or PR.
-- Follow the author on [X (Twitter)](https://x.com/jplx05) for updates!
 
 ## License
 
