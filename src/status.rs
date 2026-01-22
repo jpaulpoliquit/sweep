@@ -14,9 +14,9 @@ thread_local! {
 }
 
 #[cfg(windows)]
-use std::sync::RwLock;
-#[cfg(windows)]
 use std::sync::atomic::{AtomicBool, Ordering};
+#[cfg(windows)]
+use std::sync::RwLock;
 
 #[cfg(windows)]
 lazy_static::lazy_static! {
@@ -509,8 +509,7 @@ pub fn gather_status_with_options(
         let (processes, top_io_processes, boot_info) = if options.include_wmi {
             let handle_counts = gather_process_handle_counts();
             let page_faults = gather_process_page_faults();
-            let processes =
-                gather_top_processes_with_wmi(system, 10, &handle_counts, &page_faults);
+            let processes = gather_top_processes_with_wmi(system, 10, &handle_counts, &page_faults);
             let top_io_processes = gather_process_io_metrics();
             let boot_info = gather_boot_info();
             (processes, top_io_processes, boot_info)
