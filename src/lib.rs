@@ -7,6 +7,7 @@ pub mod categories;
 pub mod cleaner;
 pub mod cli;
 pub mod config;
+pub mod debug_log;
 pub mod disk_usage;
 mod disk_usage_cache;
 pub mod git;

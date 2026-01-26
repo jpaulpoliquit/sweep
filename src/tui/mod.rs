@@ -8,7 +8,7 @@ pub mod state;
 pub mod theme;
 pub mod widgets;
 
-use anyhow::{Context, Result};
+use anyhow::{anyhow, Context, Result};
 use crossterm::{
     event::{self, DisableMouseCapture, EnableMouseCapture, Event, KeyEventKind},
     execute,
@@ -26,6 +26,7 @@ use self::state::AppState;
 use crate::cleaner;
 use crate::cli::ScanOptions;
 use crate::config::Config;
+use crate::debug_log;
 use crate::restore;
 use crate::scan_cache::ScanCache;
 use crate::scan_events::ScanProgressEvent;
@@ -1095,6 +1096,106 @@ fn perform_scan_with_progress(
     Ok(())
 }
 
+fn empty_batch_result() -> cleaner::BatchDeleteResult {
+    cleaner::BatchDeleteResult {
+        success_count: 0,
+        error_count: 0,
+        deleted_paths: Vec::new(),
+        skipped_paths: Vec::new(),
+        locked_paths: Vec::new(),
+        permission_denied_paths: Vec::new(),
+    }
+}
+
+fn run_batch_delete_with_ui(
+    app_state: &mut AppState,
+    terminal: &mut ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>,
+    paths: Vec<PathBuf>,
+    permanent: bool,
+) -> cleaner::BatchDeleteResult {
+    if paths.is_empty() {
+        return empty_batch_result();
+    }
+
+    let (tx, rx) = mpsc::channel();
+    std::thread::spawn(move || {
+        let result = cleaner::clean_paths_batch(&paths, permanent);
+        let _ = tx.send(result);
+    });
+
+    let mut last_tick_update = std::time::Instant::now();
+    let mut warned = false;
+
+    loop {
+        match rx.try_recv() {
+            Ok(result) => return result,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                debug_log::cleaning_log("batch delete thread disconnected");
+                return empty_batch_result();
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+
+        if !warned && last_tick_update.elapsed().as_secs() >= 5 {
+            debug_log::cleaning_log("batch delete still running after 5s");
+            warned = true;
+        }
+
+        if last_tick_update.elapsed().as_millis() >= 100 {
+            app_state.tick = app_state.tick.wrapping_add(1);
+            last_tick_update = std::time::Instant::now();
+            let _ = terminal.draw(|f| render(f, app_state));
+        }
+
+        std::thread::sleep(Duration::from_millis(16));
+    }
+}
+
+fn run_delete_with_ui(
+    app_state: &mut AppState,
+    terminal: &mut ratatui::Terminal<ratatui::backend::CrosstermBackend<std::io::Stdout>>,
+    path: PathBuf,
+    permanent: bool,
+) -> anyhow::Result<cleaner::DeleteOutcome> {
+    let display_path = path.display().to_string();
+    let (tx, rx) = mpsc::channel();
+    let path_for_thread = path.clone();
+    std::thread::spawn(move || {
+        let result = cleaner::delete_with_precheck(&path_for_thread, permanent);
+        let _ = tx.send(result);
+    });
+
+    let mut last_tick_update = std::time::Instant::now();
+    let mut warned = false;
+
+    loop {
+        match rx.try_recv() {
+            Ok(result) => return result,
+            Err(std::sync::mpsc::TryRecvError::Disconnected) => {
+                debug_log::cleaning_log("delete thread disconnected");
+                return Err(anyhow!("Delete thread disconnected"));
+            }
+            Err(std::sync::mpsc::TryRecvError::Empty) => {}
+        }
+
+        if !warned && last_tick_update.elapsed().as_secs() >= 5 {
+            debug_log::cleaning_log(&format!(
+                "delete still running after 5s: {}",
+                display_path
+            ));
+            warned = true;
+        }
+
+        if last_tick_update.elapsed().as_millis() >= 100 {
+            app_state.tick = app_state.tick.wrapping_add(1);
+            last_tick_update = std::time::Instant::now();
+            let _ = terminal.draw(|f| render(f, app_state));
+        }
+
+        std::thread::sleep(Duration::from_millis(16));
+    }
+}
+
 /// Perform cleanup of selected items with real-time progress updates
 /// Returns (cleaned_count, cleaned_bytes, error_count, failed_temp_files)
 fn perform_cleanup(
@@ -1130,6 +1231,14 @@ fn perform_cleanup(
         }
     }
 
+    debug_log::cleaning_log(&format!(
+        "cleanup start: permanent={} selected_items={} trash_items={} items_to_clean={}",
+        permanent,
+        app_state.selected_items.len(),
+        trash_items.len(),
+        items_to_clean.len()
+    ));
+
     // Handle trash items first (all at once)
     let mut trash_cleaned = 0u64;
     let mut trash_errors = 0usize;
@@ -1141,6 +1250,7 @@ fn perform_cleanup(
         }
         let _ = terminal.draw(|f| render(f, app_state));
 
+        debug_log::cleaning_log("trash clean start");
         match categories::trash::clean() {
             Ok(()) => {
                 // All trash items are cleaned
@@ -1156,6 +1266,7 @@ fn perform_cleanup(
             Err(e) => {
                 // If trash cleaning fails, all trash items failed
                 trash_errors = trash_items.len();
+                debug_log::cleaning_log(&format!("trash clean failed: {}", e));
                 // Log trash cleanup failure
                 history.log_failure(
                     std::path::Path::new("Recycle Bin"),
@@ -1222,9 +1333,22 @@ fn perform_cleanup(
         }
     }
 
+    debug_log::cleaning_log(&format!(
+        "cleanup groups: applications={} special={} cache={} temp={} batch={}",
+        applications_items.len(),
+        special_items.len(),
+        cache_items.len(),
+        temp_items.len(),
+        batch_items.len()
+    ));
+
     // Handle installed applications: uninstall + delete leftover artifacts.
     // IMPORTANT: uninstall is not safely restorable, even when permanent=false.
     if !applications_items.is_empty() {
+        debug_log::cleaning_log(&format!(
+            "cleanup applications start: count={}",
+            applications_items.len()
+        ));
         if let crate::tui::state::Screen::Cleaning { ref mut progress } = app_state.screen {
             progress.current_category =
                 format!("Uninstalling {} applications...", applications_items.len());
@@ -1285,6 +1409,10 @@ fn perform_cleanup(
             let log_as_permanent = true;
             if had_error {
                 errors += 1;
+                debug_log::cleaning_log(&format!(
+                    "application cleanup failed: {}",
+                    install_path.display()
+                ));
                 history.log_failure(
                     &install_path,
                     size_bytes,
@@ -1310,6 +1438,10 @@ fn perform_cleanup(
 
     // Handle special categories first (they need individual processing)
     if !special_items.is_empty() {
+        debug_log::cleaning_log(&format!(
+            "cleanup special items start: count={}",
+            special_items.len()
+        ));
         if let crate::tui::state::Screen::Cleaning { ref mut progress } = app_state.screen {
             progress.current_category = "Cleaning special items...".to_string();
         }
@@ -1331,7 +1463,7 @@ fn perform_cleanup(
                 let _ = terminal.draw(|f| render(f, app_state));
             }
 
-            let delete_result = cleaner::delete_with_precheck(&path, permanent);
+            let delete_result = run_delete_with_ui(app_state, terminal, path.clone(), permanent);
 
             match delete_result {
                 Ok(cleaner::DeleteOutcome::Deleted) => {
@@ -1346,6 +1478,10 @@ fn perform_cleanup(
                 ) => {}
                 Ok(cleaner::DeleteOutcome::SkippedLocked) => {
                     errors += 1;
+                    debug_log::cleaning_log(&format!(
+                        "special item locked: {}",
+                        path.display()
+                    ));
                     let category_lower = category.to_lowercase();
                     history.log_failure(
                         &path,
@@ -1357,6 +1493,10 @@ fn perform_cleanup(
                 }
                 Ok(cleaner::DeleteOutcome::SkippedPermission) => {
                     errors += 1;
+                    debug_log::cleaning_log(&format!(
+                        "special item permission denied: {}",
+                        path.display()
+                    ));
                     let category_lower = category.to_lowercase();
                     history.log_failure(
                         &path,
@@ -1368,6 +1508,11 @@ fn perform_cleanup(
                 }
                 Err(e) => {
                     errors += 1;
+                    debug_log::cleaning_log(&format!(
+                        "special item delete error: {} ({})",
+                        path.display(),
+                        e
+                    ));
                     // Log failure
                     let category_lower = category.to_lowercase();
                     history.log_failure(
@@ -1392,6 +1537,10 @@ fn perform_cleanup(
 
     // Handle cache items individually to avoid Windows dialogs blocking batch deletion
     if !cache_items.is_empty() {
+        debug_log::cleaning_log(&format!(
+            "cleanup cache items start: count={}",
+            cache_items.len()
+        ));
         if let crate::tui::state::Screen::Cleaning { ref mut progress } = app_state.screen {
             progress.current_category = format!("Cleaning {} cache items...", cache_items.len());
         }
@@ -1413,7 +1562,7 @@ fn perform_cleanup(
                 let _ = terminal.draw(|f| render(f, app_state));
             }
 
-            match cleaner::delete_with_precheck(&path, permanent) {
+            match run_delete_with_ui(app_state, terminal, path.clone(), permanent) {
                 Ok(cleaner::DeleteOutcome::Deleted) => {
                     cleaned += 1;
                     cleaned_bytes += size_bytes;
@@ -1425,6 +1574,10 @@ fn perform_cleanup(
                 ) => {}
                 Ok(cleaner::DeleteOutcome::SkippedLocked) => {
                     errors += 1;
+                    debug_log::cleaning_log(&format!(
+                        "cache item locked: {}",
+                        path.display()
+                    ));
                     history.log_failure(
                         &path,
                         size_bytes,
@@ -1435,10 +1588,19 @@ fn perform_cleanup(
                 }
                 Ok(cleaner::DeleteOutcome::SkippedPermission) => {
                     errors += 1;
+                    debug_log::cleaning_log(&format!(
+                        "cache item permission denied: {}",
+                        path.display()
+                    ));
                     history.log_failure(&path, size_bytes, "cache", permanent, "Permission denied");
                 }
                 Err(e) => {
                     errors += 1;
+                    debug_log::cleaning_log(&format!(
+                        "cache item delete error: {} ({})",
+                        path.display(),
+                        e
+                    ));
                     // Log failure
                     history.log_failure(&path, size_bytes, "cache", permanent, &e.to_string());
                 }
@@ -1461,6 +1623,10 @@ fn perform_cleanup(
     // Handle temp files separately with smaller batches to reduce failures
     // Temp files are more likely to be locked by running applications
     if !temp_items.is_empty() {
+        debug_log::cleaning_log(&format!(
+            "cleanup temp items start: count={}",
+            temp_items.len()
+        ));
         // Calculate total bytes for temp items
         let temp_total_bytes: u64 = temp_items.iter().map(|(_, _, size)| size).sum();
 
@@ -1505,7 +1671,16 @@ fn perform_cleanup(
             }
 
             // Delete this batch
-            let batch_result = cleaner::clean_paths_batch(batch_chunk, permanent);
+            debug_log::cleaning_log(&format!(
+                "temp batch delete: count={}",
+                batch_chunk.len()
+            ));
+            let batch_result = run_batch_delete_with_ui(
+                app_state,
+                terminal,
+                batch_chunk.to_vec(),
+                permanent,
+            );
             temp_success += batch_result.success_count;
             temp_errors += batch_result.error_count;
             deleted_paths.extend(batch_result.deleted_paths);
@@ -1586,6 +1761,10 @@ fn perform_cleanup(
 
     // Batch delete all remaining items (FAST PATH)
     if !batch_items.is_empty() {
+        debug_log::cleaning_log(&format!(
+            "cleanup batch items start: count={}",
+            batch_items.len()
+        ));
         // Calculate total bytes for batch items
         let batch_total_bytes: u64 = batch_items.iter().map(|(_, _, size)| size).sum();
 
@@ -1629,7 +1808,16 @@ fn perform_cleanup(
             }
 
             // Delete this batch
-            let batch_result = cleaner::clean_paths_batch(batch_chunk, permanent);
+            debug_log::cleaning_log(&format!(
+                "batch delete chunk: count={}",
+                batch_chunk.len()
+            ));
+            let batch_result = run_batch_delete_with_ui(
+                app_state,
+                terminal,
+                batch_chunk.to_vec(),
+                permanent,
+            );
             batch_success += batch_result.success_count;
             batch_errors += batch_result.error_count;
             deleted_paths.extend(batch_result.deleted_paths);
@@ -1726,6 +1914,11 @@ fn perform_cleanup(
         #[cfg(debug_assertions)]
         eprintln!("[DEBUG] Failed to save deletion log: {}", e);
     }
+
+    debug_log::cleaning_log(&format!(
+        "cleanup complete: cleaned={} errors={} cleaned_bytes={}",
+        cleaned, errors, cleaned_bytes
+    ));
 
     Ok((cleaned, cleaned_bytes, errors, failed_temp_files))
 }

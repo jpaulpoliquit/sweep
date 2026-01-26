@@ -4,14 +4,15 @@ use crate::scan_cache::session::{ScanSession, ScanStats};
 use crate::scan_cache::signature::{FileSignature, FileStatus};
 use anyhow::{Context, Result};
 use chrono::{DateTime, Utc};
-use rusqlite::{params, Connection};
+use rusqlite::{params, Connection, ErrorCode};
 use serde_json;
 use std::collections::HashMap;
 use std::io;
 use std::path::{Path, PathBuf};
-use std::time::{SystemTime, UNIX_EPOCH};
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 const SCHEMA_VERSION: i32 = 3;
+const DB_BUSY_TIMEOUT_SECS: u64 = 30;
 
 /// Scan cache database
 pub struct ScanCache {
@@ -64,7 +65,7 @@ impl ScanCache {
             .with_context(|| "Failed to enable WAL mode")?;
 
         // Set busy timeout to handle concurrent access gracefully
-        db.busy_timeout(std::time::Duration::from_secs(30))
+        db.busy_timeout(Duration::from_secs(DB_BUSY_TIMEOUT_SECS))
             .with_context(|| "Failed to set busy timeout")?;
 
         // Performance optimizations for rebuildable cache
@@ -806,6 +807,26 @@ impl ScanCache {
         Ok(())
     }
 
+    /// Best-effort non-blocking finish to avoid UI stalls.
+    /// Returns true if finished synchronously, false if deferred.
+    pub fn finish_scan_nonblocking(&mut self, scan_id: i64, stats: ScanStats) -> Result<bool> {
+        // Avoid blocking on database locks at the tail end of a scan.
+        let _ = self.db.busy_timeout(Duration::from_millis(0));
+        let result = self.finish_scan(scan_id, stats);
+        let _ = self.db.busy_timeout(Duration::from_secs(DB_BUSY_TIMEOUT_SECS));
+
+        match result {
+            Ok(()) => Ok(true),
+            Err(e) => {
+                if is_busy_error(&e) {
+                    Ok(false)
+                } else {
+                    Err(e)
+                }
+            }
+        }
+    }
+
     /// Force full rescan (clear cache for categories)
     pub fn invalidate(&mut self, categories: Option<&[&str]>) -> Result<()> {
         if let Some(cats) = categories {
@@ -968,6 +989,17 @@ impl ScanCache {
         )?;
 
         Ok((total_files as usize, total_storage as u64))
+    }
+}
+
+fn is_busy_error(err: &anyhow::Error) -> bool {
+    match err.downcast_ref::<rusqlite::Error>() {
+        Some(rusqlite::Error::SqliteFailure(code, _))
+            if matches!(code.code, ErrorCode::DatabaseBusy | ErrorCode::DatabaseLocked) =>
+        {
+            true
+        }
+        _ => false,
     }
 }
 

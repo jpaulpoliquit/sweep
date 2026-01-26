@@ -15,6 +15,66 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::mpsc::Sender;
 
+#[derive(Debug)]
+struct RecycleBinIndex {
+    exact: HashSet<String>,
+    prefixes: Vec<String>,
+}
+
+impl RecycleBinIndex {
+    fn from_system() -> Option<Self> {
+        #[cfg(windows)]
+        {
+            use crate::restore::normalize_path_for_comparison;
+
+            let items = crate::trash_ops::list().ok()?;
+            let mut exact = HashSet::new();
+            let mut prefixes = Vec::new();
+
+            for item in items {
+                let original_path = item.original_parent.join(&item.name);
+                let normalized = normalize_path_for_comparison(&original_path.display().to_string());
+                exact.insert(normalized.clone());
+                if normalized.ends_with('/') {
+                    prefixes.push(normalized);
+                } else {
+                    prefixes.push(format!("{}/", normalized));
+                }
+            }
+
+            Some(Self { exact, prefixes })
+        }
+        #[cfg(not(windows))]
+        {
+            None
+        }
+    }
+
+    fn contains(&self, path: &Path) -> bool {
+        #[cfg(windows)]
+        {
+            use crate::restore::normalize_path_for_comparison;
+
+            let normalized = normalize_path_for_comparison(&path.display().to_string());
+            if self.exact.contains(&normalized) {
+                return true;
+            }
+            self.prefixes
+                .iter()
+                .any(|prefix| normalized.starts_with(prefix))
+        }
+        #[cfg(not(windows))]
+        {
+            let _ = path;
+            false
+        }
+    }
+
+    fn is_empty(&self) -> bool {
+        self.exact.is_empty() && self.prefixes.is_empty()
+    }
+}
+
 /// Save scan results to cache in a background thread to avoid blocking the UI.
 /// This function spawns a thread that opens its own database connection and performs
 /// all cache writes asynchronously, allowing the scan results to be returned immediately.
@@ -34,6 +94,8 @@ fn save_results_to_cache_background(results: ScanResults, scan_session_id: i64) 
         let mut category_batches: std::collections::HashMap<String, Vec<(FileSignature, String)>> =
             std::collections::HashMap::new();
 
+        let recycle_bin_index = RecycleBinIndex::from_system();
+
         // Helper to add paths from a category result
         // Exclude files that are in the recycle bin from cache (they were cleaned)
         // Exception: trash category - those files ARE in recycle bin, so include them
@@ -41,7 +103,11 @@ fn save_results_to_cache_background(results: ScanResults, scan_session_id: i64) 
             for path in paths {
                 // Skip files that are in the recycle bin (they were cleaned)
                 // UNLESS this is the trash category (which scans recycle bin itself)
-                if category != "trash" && is_in_recycle_bin(path) {
+                let in_recycle_bin = recycle_bin_index
+                    .as_ref()
+                    .map(|index| index.contains(path))
+                    .unwrap_or(false);
+                if category != "trash" && in_recycle_bin {
                     continue;
                 }
 
@@ -88,6 +154,21 @@ fn save_results_to_cache_background(results: ScanResults, scan_session_id: i64) 
 
         // Cleanup stale files (non-fatal - scan already completed)
         let _removed = cache.cleanup_stale(scan_session_id).unwrap_or(0);
+    });
+}
+
+fn defer_finish_scan(scan_session_id: i64, stats: ScanStats) {
+    std::thread::spawn(move || {
+        let mut cache = match ScanCache::open() {
+            Ok(cache) => cache,
+            Err(e) => {
+                eprintln!("Warning: Failed to open cache for finish: {}", e);
+                return;
+            }
+        };
+        if let Err(e) = cache.finish_scan(scan_session_id, stats) {
+            eprintln!("Warning: Failed to finish scan session in background: {}", e);
+        }
     });
 }
 
@@ -616,8 +697,12 @@ pub fn scan_all(
                 removed_files: 0, // Will be updated by cleanup_stale in background thread
                 ..Default::default()
             };
-            if let Err(e) = cache.finish_scan(scan_session_id, stats) {
-                eprintln!("Warning: Failed to finish scan session: {}", e);
+            match cache.finish_scan_nonblocking(scan_session_id, stats.clone()) {
+                Ok(true) => {}
+                Ok(false) => defer_finish_scan(scan_session_id, stats.clone()),
+                Err(e) => {
+                    eprintln!("Warning: Failed to finish scan session: {}", e);
+                }
             }
 
             // Clone results for background thread (only paths and counts, not heavy data)
@@ -1318,8 +1403,12 @@ pub fn scan_all_with_progress(
                 removed_files: 0, // Will be updated by cleanup_stale in background thread
                 ..Default::default()
             };
-            if let Err(e) = cache.finish_scan(scan_session_id, stats) {
-                eprintln!("Warning: Failed to finish scan session: {}", e);
+            match cache.finish_scan_nonblocking(scan_session_id, stats.clone()) {
+                Ok(true) => {}
+                Ok(false) => defer_finish_scan(scan_session_id, stats.clone()),
+                Err(e) => {
+                    eprintln!("Warning: Failed to finish scan session: {}", e);
+                }
             }
 
             // Clone results for background thread (only paths and counts, not heavy data)
@@ -1357,6 +1446,14 @@ enum ScanTask {
 /// but keep them tracked in cache (they can be restored)
 /// Note: This does NOT filter the trash category itself - that's a separate scan
 fn filter_recycle_bin_files(results: &mut ScanResults) {
+    let recycle_bin_index = RecycleBinIndex::from_system();
+    let Some(recycle_bin_index) = recycle_bin_index else {
+        return;
+    };
+    if recycle_bin_index.is_empty() {
+        return;
+    }
+
     // Helper to filter paths and recalculate size_bytes efficiently
     let filter_and_recalculate = |paths: &mut Vec<PathBuf>, size_bytes: &mut u64| {
         let original_count = paths.len();
@@ -1364,7 +1461,7 @@ fn filter_recycle_bin_files(results: &mut ScanResults) {
 
         // Filter out paths that are in the recycle bin
         paths.retain(|path| {
-            let in_recycle_bin = is_in_recycle_bin(path);
+            let in_recycle_bin = recycle_bin_index.contains(path);
             if in_recycle_bin {
                 // Calculate size of excluded path before removing
                 if let Ok(metadata) = std::fs::metadata(path) {

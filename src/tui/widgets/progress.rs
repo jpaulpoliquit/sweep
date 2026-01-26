@@ -134,16 +134,13 @@ pub fn render_progress_bar(
     }
 
     // Render size and status on the right side (no percentage)
-    let size_text = if let Some(size_bytes) = size {
-        bytesize::to_string(size_bytes, false)
-    } else {
-        "---".to_string()
-    };
-
-    // Status without percentage
     let display_status = status.to_string();
-
-    let status_text = format!("{:>8} {}", size_text, display_status);
+    let status_text = if let Some(size_bytes) = size {
+        let size_text = bytesize::to_string(size_bytes, false);
+        format!("{:>8} {}", size_text, display_status)
+    } else {
+        display_status
+    };
     let status_line = Line::from(vec![Span::styled(status_text, Styles::secondary())]);
 
     let status_paragraph = Paragraph::new(status_line);

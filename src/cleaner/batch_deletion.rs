@@ -4,6 +4,7 @@
 
 use super::path_precheck::{precheck_path, PrecheckOutcome};
 use super::single_deletion::{classify_anyhow_error, delete_with_precheck, DeleteOutcome};
+use crate::debug_log;
 use std::path::PathBuf;
 
 #[derive(Debug)]
@@ -56,6 +57,16 @@ pub fn clean_paths_batch(paths: &[PathBuf], permanent: bool) -> BatchDeleteResul
     if paths.is_empty() {
         return BatchDeleteResult::empty();
     }
+
+    let first_path = paths.first().map(|p| p.display().to_string()).unwrap_or_default();
+    let last_path = paths.last().map(|p| p.display().to_string()).unwrap_or_default();
+    debug_log::cleaning_log(&format!(
+        "batch delete start: permanent={} count={} first={} last={}",
+        permanent,
+        paths.len(),
+        first_path,
+        last_path
+    ));
 
     let mut success_count = 0;
     let mut error_count = 0;
@@ -112,6 +123,11 @@ pub fn clean_paths_batch(paths: &[PathBuf], permanent: bool) -> BatchDeleteResul
                     deleted_paths.extend(unlocked);
                 }
                 Err(_err) => {
+                    debug_log::cleaning_log(&format!(
+                        "batch delete_all failed: count={} error={}",
+                        unlocked.len(),
+                        _err
+                    ));
                     let (mut remaining, deleted) = partition_existing(unlocked);
                     success_count += deleted.len();
                     deleted_paths.extend(deleted);
@@ -124,6 +140,11 @@ pub fn clean_paths_batch(paths: &[PathBuf], permanent: bool) -> BatchDeleteResul
 
                     // Try deleting in smaller batches
                     if remaining.len() > BATCH_SIZE {
+                        debug_log::cleaning_log(&format!(
+                            "batch delete fallback: splitting into chunks of {} (remaining={})",
+                            BATCH_SIZE,
+                            remaining.len()
+                        ));
                         let batches: Vec<Vec<PathBuf>> = remaining
                             .chunks(BATCH_SIZE)
                             .map(|chunk| chunk.to_vec())
@@ -137,7 +158,12 @@ pub fn clean_paths_batch(paths: &[PathBuf], permanent: bool) -> BatchDeleteResul
                                     deleted_paths.extend(batch);
                                     _batch_success = true;
                                 }
-                                Err(_) => {
+                                Err(batch_err) => {
+                                    debug_log::cleaning_log(&format!(
+                                        "batch chunk delete_all failed: count={} error={}",
+                                        batch.len(),
+                                        batch_err
+                                    ));
                                     // This batch failed, keep any that still exist for one-by-one
                                     let (still_remaining, deleted) = partition_existing(batch);
                                     success_count += deleted.len();
@@ -190,6 +216,11 @@ pub fn clean_paths_batch(paths: &[PathBuf], permanent: bool) -> BatchDeleteResul
                                             }
                                         }
                                     }
+                                    debug_log::cleaning_log(&format!(
+                                        "delete failed: path={} error={}",
+                                        path.display(),
+                                        _err
+                                    ));
                                     #[cfg(debug_assertions)]
                                     eprintln!(
                                         "[DEBUG] Failed to delete {}: {}",
@@ -204,6 +235,15 @@ pub fn clean_paths_batch(paths: &[PathBuf], permanent: bool) -> BatchDeleteResul
             }
         }
     }
+
+    debug_log::cleaning_log(&format!(
+        "batch delete done: success={} errors={} skipped={} locked={} permission_denied={}",
+        success_count,
+        error_count,
+        skipped_paths.len(),
+        locked_paths.len(),
+        permission_denied_paths.len()
+    ));
 
     BatchDeleteResult {
         success_count,
